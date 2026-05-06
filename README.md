@@ -29,8 +29,8 @@ M1,#1,C1 — slow zoom in,01:00:00:00,01:00:02:01,00:00:02:01,#f23800
 
 The app parses cameras from the beginning of the `Name` field:
 
-- `C1 — slow zoom in` → camera `C1`, description `slow zoom in`
-- `C2 — zoom out` → camera `C2`, description `zoom out`
+- `C1 — slow zoom in` → camera `1`, description `slow zoom in`
+- `C2 — zoom out` → camera `2`, description `zoom out`
 - `WHITE` / `BLACK` are shown in the waterfall but are not pinnable and do not show descriptions.
 
 ## Transitions

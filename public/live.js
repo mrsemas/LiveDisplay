@@ -229,7 +229,7 @@ function renderPinnedRow() {
 
   const entries = showData.entries || [];
   const cameraEntries = entries.filter(e => e.source === selectedCamera);
-  const active = cameraEntries.find(e => e.startMs <= localPositionMs && (e.renderEndMs || e.endMs) > localPositionMs);
+  const active = cameraEntries.find(e => isEntryOnAir(e, localPositionMs));
   const next = cameraEntries.find(e => e.startMs > localPositionMs);
   const ref = active || next;
   const color = findColorForSource(selectedCamera) || '#333';
@@ -246,14 +246,12 @@ function renderPinnedRow() {
     ? formatCountdown((ref.renderEndMs || ref.endMs) - localPositionMs)
     : formatCountdown(ref.startMs - localPositionMs);
 
-  const countClass = isLive
-    ? `live ${(ref.renderEndMs || ref.endMs) - localPositionMs < 3500 ? 'warn' : ''}`
-    : 'future';
+  const countClass = isLive ? 'live' : 'future';
 
   const bars = cameraEntries
     .filter(entry => (entry.renderEndMs || entry.endMs) > localPositionMs - 80)
     .map(entry => {
-      const entryLive = entry.startMs <= localPositionMs && (entry.renderEndMs || entry.endMs) > localPositionMs;
+      const entryLive = isEntryOnAir(entry, localPositionMs);
       return cueGeometryHtml(entry, localPositionMs, entry.color || color, entryLive);
     })
     .join('');
@@ -281,7 +279,7 @@ function renderWaterfallRows(force = false) {
   visible = visible.slice(0, maxRows + 1);
 
   const html = visible.map((entry, i) => {
-    const isLive = entry.startMs <= localPositionMs && (entry.renderEndMs || entry.endMs) > localPositionMs;
+    const isLive = isEntryOnAir(entry, localPositionMs);
     return rowHtml(entry, i + 1, localPositionMs, false, isLive, entry.source);
   }).join('');
 
@@ -297,9 +295,7 @@ function rowHtml(entry, displayIndex, nowMs, pinned, isLive, sourceOverride) {
     ? formatCountdown(effectiveEndMs - nowMs)
     : formatDuration(entry.endMs - entry.startMs);
 
-  const countClass = isLive
-    ? `live ${effectiveEndMs - nowMs < 3500 ? 'warn' : ''}`
-    : 'duration';
+  const countClass = isLive ? 'live' : 'duration';
 
   const rowClass = pinned ? `timeline-row pinned ${isLive ? 'current' : 'future'}` : `timeline-row ${isLive ? 'current' : 'future'}`;
   const indexLabel = pinned ? 'PIN' : displayIndex;
@@ -342,6 +338,10 @@ function formatDescription(entry, pinned, isLive) {
   const status = pinned ? `<span class="timeline-chip">${isLive ? 'ON AIR' : 'STANDBY'}</span>` : '';
   const description = entry.description || '';
   return `${status}${escapeHtml(description)}`;
+}
+
+function isEntryOnAir(entry, nowMs) {
+  return entry.startMs <= nowMs && (entry.renderEndMs || entry.endMs) > nowMs;
 }
 
 function cueGeometryHtml(entry, nowMs, color, isLive) {

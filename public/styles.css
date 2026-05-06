@@ -253,7 +253,7 @@ button, input, select { font: inherit; }
 }
 .count-cell.future { color: #a6a6a6; }
 .count-cell.duration { color: #a6a6a6; }
-.count-cell.live { color: #fff; }
+.count-cell.live { color: var(--red); }
 .count-cell.warn { color: #ffbeb6; }
 .timeline-row.pinned .count-cell { font-size: 27px; }
 

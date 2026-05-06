@@ -84,6 +84,7 @@ function ensureStoreShape(input) {
     show.createdAt ||= new Date().toISOString();
     show.updatedAt ||= new Date().toISOString();
     for (const timeline of show.timelines) {
+      normalizeTimelineCameraSources(timeline);
       timeline.transitions = normalizeTransitions(timeline.transitions || []);
     }
   }
@@ -702,7 +703,7 @@ function parseSourceAndDescription(name) {
   const cameraMatch = normalized.match(/^(C\d+)\s*(?:[—–-]\s*)?(.*)$/i);
   if (cameraMatch) {
     return {
-      source: cameraMatch[1].toUpperCase(),
+      source: cameraNumber(cameraMatch[1]),
       description: cameraMatch[2]?.trim() || '',
       isCamera: true
     };
@@ -716,6 +717,21 @@ function parseSourceAndDescription(name) {
     description: (separatorMatch?.[2] || '').trim(),
     isCamera: false
   };
+}
+
+function normalizeTimelineCameraSources(timeline) {
+  for (const entry of timeline.entries || []) {
+    if (!entry?.isCamera) continue;
+    const source = cameraNumber(entry.source || entry.camera || entry.rawName);
+    if (!source) continue;
+    entry.source = source;
+    entry.camera = source;
+  }
+}
+
+function cameraNumber(input) {
+  const match = String(input || '').trim().match(/^C?(\d+)\b/i);
+  return match ? String(Number(match[1])) : '';
 }
 
 function normalizeColor(input, isCamera) {
@@ -769,6 +785,6 @@ function pad2(n) {
 }
 
 function cameraSortKey(camera) {
-  const n = Number(String(camera).replace(/^C/i, ''));
+  const n = Number(cameraNumber(camera));
   return Number.isFinite(n) ? n : 9999;
 }

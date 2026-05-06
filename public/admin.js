@@ -109,7 +109,7 @@ function addAbbreviationRow(source = '', label = '') {
   const row = document.createElement('div');
   row.className = 'abbr-row';
   row.innerHTML = `
-    <input class="abbr-source" type="text" placeholder="Original, e.g. BLACK or C1" value="${escapeAttr(source)}" />
+    <input class="abbr-source" type="text" placeholder="Original, e.g. BLACK or 1" value="${escapeAttr(source)}" />
     <span class="abbr-arrow">→</span>
     <input class="abbr-label" type="text" maxlength="14" placeholder="Short label, e.g. BLK" value="${escapeAttr(label)}" />
     <button class="abbr-remove" type="button">Remove</button>
@@ -142,7 +142,7 @@ async function saveAbbreviations(event) {
 }
 
 function sourceSortKey(source) {
-  const cam = String(source).match(/^C(\d+)$/i);
+  const cam = String(source).match(/^C?(\d+)$/i);
   if (cam) return Number(cam[1]);
   return 10000;
 }
