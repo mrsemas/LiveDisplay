@@ -15,6 +15,7 @@ const PUBLIC_DIR = path.join(ROOT, 'public');
 const DATA_DIR = path.join(ROOT, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const ABBREVIATIONS_FILE = path.join(DATA_DIR, 'abbreviations.json');
+const COMPANION_FILE = path.join(DATA_DIR, 'companion.json');
 
 const FPS = 25;
 const BASE_TIMECODE = '01:00:00:00';
@@ -37,10 +38,18 @@ app.use(express.static(PUBLIC_DIR));
 
 let store = loadStore();
 let abbreviations = loadAbbreviations();
+let companion = loadCompanion();
 let playback = {
   status: 'stopped', // stopped | playing | paused
   positionMs: 0,
   startedAtMs: 0
+};
+let companionRuntime = {
+  lastPositionMs: null,
+  pendingEvents: [],
+  firedEventIds: new Set(),
+  mixBlockUntilMs: 0,
+  processing: false
 };
 
 function newId(prefix = 'id') {
@@ -124,6 +133,72 @@ function saveAbbreviations(next = abbreviations) {
   fs.writeFileSync(ABBREVIATIONS_FILE, JSON.stringify(normalized, null, 2));
 }
 
+function loadCompanion() {
+  if (!fs.existsSync(COMPANION_FILE)) {
+    const initial = defaultCompanionConfig();
+    saveCompanion(initial);
+    return initial;
+  }
+
+  try {
+    const raw = fs.readFileSync(COMPANION_FILE, 'utf8');
+    return normalizeCompanionConfig(JSON.parse(raw));
+  } catch {
+    const initial = defaultCompanionConfig();
+    saveCompanion(initial);
+    return initial;
+  }
+}
+
+function saveCompanion(next = companion) {
+  const normalized = normalizeCompanionConfig(next);
+  fs.writeFileSync(COMPANION_FILE, JSON.stringify(normalized, null, 2));
+}
+
+function defaultCompanionConfig() {
+  const sources = {};
+  for (let i = 1; i <= 20; i++) sources[String(i)] = '';
+  sources.WHITE = '';
+  sources.BLACK = '';
+
+  return {
+    enabled: false,
+    host: '',
+    port: 8000,
+    sources,
+    transitions: {
+      cut: '',
+      mixRate: '',
+      mixTrigger: ''
+    }
+  };
+}
+
+function normalizeCompanionConfig(input) {
+  const defaults = defaultCompanionConfig();
+  const sourceInput = input?.sources && typeof input.sources === 'object' ? input.sources : {};
+  const transitionInput = input?.transitions && typeof input.transitions === 'object' ? input.transitions : {};
+
+  return {
+    enabled: Boolean(input?.enabled),
+    host: String(input?.host || '').trim(),
+    port: Math.max(1, Math.min(65535, Number(input?.port) || defaults.port)),
+    sources: Object.fromEntries(Object.keys(defaults.sources).map(source => [
+      source,
+      normalizeLocation(sourceInput[source])
+    ])),
+    transitions: {
+      cut: normalizeLocation(transitionInput.cut),
+      mixRate: normalizeLocation(transitionInput.mixRate),
+      mixTrigger: normalizeLocation(transitionInput.mixTrigger)
+    }
+  };
+}
+
+function normalizeLocation(input) {
+  return String(input || '').trim();
+}
+
 function normalizeAbbreviations(input) {
   const source = input && typeof input === 'object' ? input : {};
   const normalized = {};
@@ -169,6 +244,7 @@ function timelinePayload(timeline) {
 function afterShowTimelineChange(show) {
   if (store.activeShowId !== show.id) return;
   setPlaybackPosition(currentPositionMs());
+  resetCompanionAutomation();
   broadcastShow();
   broadcastState();
 }
@@ -316,6 +392,139 @@ function broadcastState() {
   broadcast(playbackPayload());
 }
 
+function resetCompanionAutomation(positionMs = null) {
+  companionRuntime.lastPositionMs = positionMs;
+  companionRuntime.pendingEvents = [];
+  companionRuntime.firedEventIds = new Set();
+  companionRuntime.mixBlockUntilMs = 0;
+  companionRuntime.processing = false;
+}
+
+function processCompanionAutomation() {
+  if (playback.status !== 'playing') {
+    companionRuntime.lastPositionMs = currentPositionMs();
+    return;
+  }
+  if (companionRuntime.processing) return;
+
+  const nowMs = currentPositionMs();
+  const previousMs = companionRuntime.lastPositionMs;
+  companionRuntime.lastPositionMs = nowMs;
+
+  if (previousMs === null || nowMs < previousMs) return;
+
+  const events = companionEventsForActiveShow()
+    .filter(event => event.startMs > previousMs && event.startMs <= nowMs)
+    .filter(event => !companionRuntime.firedEventIds.has(event.id));
+
+  if (events.length) companionRuntime.pendingEvents.push(...events);
+  void flushCompanionEvents(nowMs);
+}
+
+async function flushCompanionEvents(nowMs = currentPositionMs()) {
+  if (companionRuntime.processing) return;
+  if (nowMs < companionRuntime.mixBlockUntilMs) return;
+
+  companionRuntime.processing = true;
+  try {
+    while (companionRuntime.pendingEvents.length && currentPositionMs() >= companionRuntime.mixBlockUntilMs) {
+      const event = companionRuntime.pendingEvents.shift();
+      if (!event || companionRuntime.firedEventIds.has(event.id)) continue;
+      companionRuntime.firedEventIds.add(event.id);
+      await fireCompanionEvent(event);
+    }
+  } finally {
+    companionRuntime.processing = false;
+  }
+}
+
+function companionEventsForActiveShow() {
+  const entries = flattenShow(getActiveShow());
+  return entries
+    .map((entry, index) => {
+      if (index === 0) return null;
+      const transition = entry.transitionIn?.type === 'mix' ? entry.transitionIn : null;
+      return {
+        id: `${entry.id}:${transition ? transition.id : 'cut'}`,
+        source: entry.source,
+        type: transition ? 'mix' : 'cut',
+        startMs: entry.startMs,
+        transition
+      };
+    })
+    .filter(Boolean);
+}
+
+async function fireCompanionEvent(event) {
+  if (!companion.enabled || !companion.host) return;
+
+  await pressCompanionLocation(companion.sources?.[event.source], `source ${event.source}`);
+
+  if (event.type === 'mix') {
+    await setCompanionVariable('transition_rate', formatTransitionRate(event.transition?.durationMs || 0));
+    await pressCompanionLocation(companion.transitions?.mixRate, 'mix rate');
+    await pressCompanionLocation(companion.transitions?.mixTrigger, 'mix trigger');
+    companionRuntime.mixBlockUntilMs = Math.max(companionRuntime.mixBlockUntilMs, event.transition?.endMs || event.startMs);
+  } else {
+    await pressCompanionLocation(companion.transitions?.cut, 'cut');
+  }
+}
+
+async function setCompanionVariable(name, value) {
+  if (!companion.enabled || !companion.host || !name) return;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1200);
+  const url = `http://${companion.host}:${companion.port}/api/custom-variable/${encodeURIComponent(name)}/value`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: String(value),
+      signal: controller.signal
+    });
+    if (!response.ok) console.warn(`Companion variable ${name} update failed: ${response.status}`);
+  } catch (err) {
+    console.warn(`Companion variable ${name} update failed: ${err.message}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function formatTransitionRate(durationMs) {
+  const seconds = Math.max(0, Number(durationMs) || 0) / 1000;
+  return seconds.toFixed(2).replace(/\.?0+$/, '');
+}
+
+async function pressCompanionLocation(location, label) {
+  const parsed = parseCompanionLocation(location);
+  if (!parsed || !companion.enabled || !companion.host) return;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1200);
+  const url = `http://${companion.host}:${companion.port}/api/location/${parsed.page}/${parsed.row}/${parsed.column}/press`;
+
+  try {
+    const response = await fetch(url, { method: 'POST', signal: controller.signal });
+    if (!response.ok) console.warn(`Companion ${label} press failed: ${response.status}`);
+  } catch (err) {
+    console.warn(`Companion ${label} press failed: ${err.message}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function parseCompanionLocation(location) {
+  const match = String(location || '').trim().match(/^(\d+)\/(\d+)\/(\d+)$/);
+  if (!match) return null;
+  return {
+    page: Number(match[1]),
+    row: Number(match[2]),
+    column: Number(match[3])
+  };
+}
+
 app.get('/', (_req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });
@@ -361,6 +570,7 @@ app.post('/api/shows', (req, res) => {
   saveStore();
   setPlaybackPosition(0);
   playback.status = 'stopped';
+  resetCompanionAutomation(0);
   broadcastShow();
   broadcastState();
   res.json({ ok: true, show });
@@ -376,6 +586,7 @@ app.post('/api/active-show', (req, res) => {
   playback.status = 'stopped';
   playback.positionMs = 0;
   playback.startedAtMs = 0;
+  resetCompanionAutomation(0);
   broadcastShow();
   broadcastState();
   res.json({ ok: true, activeShowId: show.id });
@@ -406,11 +617,24 @@ app.get('/api/abbreviations', (_req, res) => {
   });
 });
 
+app.get('/api/companion', (_req, res) => {
+  res.json({
+    companion,
+    file: 'data/companion.json'
+  });
+});
+
 app.post('/api/abbreviations', (req, res) => {
   abbreviations = normalizeAbbreviations(req.body?.abbreviations || {});
   saveAbbreviations(abbreviations);
   broadcastShow();
   res.json({ ok: true, abbreviations, file: 'data/abbreviations.json' });
+});
+
+app.post('/api/companion', (req, res) => {
+  companion = normalizeCompanionConfig(req.body?.companion || {});
+  saveCompanion(companion);
+  res.json({ ok: true, companion, file: 'data/companion.json' });
 });
 
 app.post('/api/import', upload.single('csv'), (req, res) => {
@@ -444,6 +668,7 @@ app.post('/api/import', upload.single('csv'), (req, res) => {
     playback.status = 'stopped';
     playback.positionMs = 0;
     playback.startedAtMs = 0;
+    resetCompanionAutomation(0);
     broadcastShow();
     broadcastState();
 
@@ -531,20 +756,25 @@ app.post('/api/control', (req, res) => {
     playback.positionMs = durationMs && current >= durationMs ? 0 : current;
     playback.startedAtMs = Date.now();
     playback.status = 'playing';
+    resetCompanionAutomation(playback.positionMs);
   } else if (action === 'pause') {
     playback.positionMs = currentPositionMs();
     playback.startedAtMs = 0;
     playback.status = 'paused';
+    resetCompanionAutomation(playback.positionMs);
   } else if (action === 'stop') {
     playback.positionMs = 0;
     playback.startedAtMs = 0;
     playback.status = 'stopped';
+    resetCompanionAutomation(0);
   } else if (action === 'reset') {
     setPlaybackPosition(0);
+    resetCompanionAutomation(0);
   } else if (action === 'seek') {
     const positionMs = Number(req.body?.positionMs);
     if (!Number.isFinite(positionMs)) return res.status(400).json({ error: 'positionMs must be a number.' });
     setPlaybackPosition(positionMs);
+    resetCompanionAutomation(playback.positionMs);
   } else {
     return res.status(400).json({ error: 'Unknown control action.' });
   }
@@ -575,7 +805,10 @@ wss.on('connection', (socket) => {
   });
 });
 
-setInterval(broadcastState, 100);
+setInterval(() => {
+  processCompanionAutomation();
+  broadcastState();
+}, 100);
 
 const PORT = Number(process.env.PORT || 3000);
 server.listen(PORT, '0.0.0.0', () => {

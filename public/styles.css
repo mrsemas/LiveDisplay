@@ -486,6 +486,47 @@ button:active { transform: translateY(1px); }
   gap: 10px;
   flex-wrap: wrap;
 }
+.companion-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mapping-details {
+  background: #0e0e0e;
+  border: 1px solid #282828;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.mapping-details summary {
+  cursor: pointer;
+  font-weight: 850;
+}
+.mapping-rows {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin-top: 12px;
+}
+.mapping-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.mapping-row span {
+  color: #ddd;
+  font-weight: 850;
+}
+.toggle-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  color: #ddd;
+}
+.toggle-row input {
+  width: auto;
+  min-height: auto;
+}
 
 .scrub-panel {
   margin-top: 18px;
@@ -647,6 +688,7 @@ button:active { transform: translateY(1px); }
   .control-grid { grid-template-columns: repeat(2, 1fr); }
   .abbr-row { grid-template-columns: 1fr 24px 1fr; }
   .abbr-remove { grid-column: 1 / -1; }
+  .mapping-rows { grid-template-columns: 1fr; }
   .admin-clock-row { grid-template-columns: 1fr; }
   .timeline-item { grid-template-columns: 38px 1fr; }
   .timeline-actions {

@@ -81,6 +81,55 @@
     </section>
 
     <section class="admin-card">
+      <h2>Companion</h2>
+      <form id="companionForm" class="companion-form">
+        <label class="toggle-row">
+          <input id="companionEnabled" type="checkbox" />
+          <span>Enable Companion Integration</span>
+        </label>
+
+        <div class="form-grid">
+          <label>
+            Companion IP
+            <input id="companionHost" type="text" placeholder="192.168.1.50" />
+          </label>
+          <label>
+            Port
+            <input id="companionPort" type="number" min="1" max="65535" step="1" placeholder="8000" />
+          </label>
+        </div>
+
+        <details class="mapping-details">
+          <summary>Source Button Mapping</summary>
+          <div id="companionSourceRows" class="mapping-rows"></div>
+        </details>
+
+        <details class="mapping-details">
+          <summary>Transition Button Mapping</summary>
+          <div class="mapping-rows">
+            <label class="mapping-row">
+              <span>Cut</span>
+              <input id="companionCut" type="text" placeholder="1/2/3" />
+            </label>
+            <label class="mapping-row">
+              <span>Change rate</span>
+              <input id="companionMixRate" type="text" placeholder="1/2/4" />
+            </label>
+            <label class="mapping-row">
+              <span>Mix trigger</span>
+              <input id="companionMixTrigger" type="text" placeholder="1/2/5" />
+            </label>
+          </div>
+        </details>
+
+        <div class="abbr-actions">
+          <button type="submit" class="primary">Save Companion</button>
+        </div>
+      </form>
+      <div id="companionStatus" class="muted small-text">Locations use page/row/column, for example 1/2/3.</div>
+    </section>
+
+    <section class="admin-card">
       <h2>Playback</h2>
       <div class="control-grid">
         <button id="startBtn" type="button" class="primary">Start</button>

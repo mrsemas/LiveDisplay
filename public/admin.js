@@ -5,6 +5,7 @@ const BASE_FRAMES = timecodeToFrames(BASE_TC);
 let showsPayload = null;
 let currentState = null;
 let abbreviations = {};
+let companion = null;
 let isScrubbing = false;
 let pendingSeekTimer = null;
 let lastSeekSentAt = 0;
@@ -32,6 +33,15 @@ const els = {
   abbreviationRows: document.getElementById('abbreviationRows'),
   addAbbreviation: document.getElementById('addAbbreviation'),
   abbreviationStatus: document.getElementById('abbreviationStatus'),
+  companionForm: document.getElementById('companionForm'),
+  companionEnabled: document.getElementById('companionEnabled'),
+  companionHost: document.getElementById('companionHost'),
+  companionPort: document.getElementById('companionPort'),
+  companionSourceRows: document.getElementById('companionSourceRows'),
+  companionCut: document.getElementById('companionCut'),
+  companionMixRate: document.getElementById('companionMixRate'),
+  companionMixTrigger: document.getElementById('companionMixTrigger'),
+  companionStatus: document.getElementById('companionStatus'),
   timelineList: document.getElementById('timelineList')
 };
 
@@ -52,6 +62,7 @@ els.scrubSlider.addEventListener('pointerup', onScrubCommit);
 els.scrubSlider.addEventListener('touchend', onScrubCommit, { passive: true });
 els.addAbbreviation.addEventListener('click', () => addAbbreviationRow('', ''));
 els.abbreviationForm.addEventListener('submit', saveAbbreviations);
+els.companionForm.addEventListener('submit', saveCompanion);
 
 await refreshAll();
 setInterval(refreshState, 400);
@@ -60,6 +71,7 @@ async function refreshAll() {
   await refreshShows();
   await refreshActiveShowDetails();
   await refreshAbbreviations();
+  await refreshCompanion();
   await refreshState();
 }
 
@@ -145,6 +157,69 @@ function sourceSortKey(source) {
   const cam = String(source).match(/^C?(\d+)$/i);
   if (cam) return Number(cam[1]);
   return 10000;
+}
+
+async function refreshCompanion() {
+  try {
+    const res = await fetch('/api/companion');
+    const payload = await res.json();
+    companion = payload.companion || {};
+    renderCompanion();
+    els.companionStatus.textContent = `Saved to ${payload.file || 'data/companion.json'}.`;
+    els.companionStatus.style.color = '';
+  } catch {
+    els.companionStatus.textContent = 'Could not load Companion settings.';
+    els.companionStatus.style.color = '#ff9a8c';
+  }
+}
+
+function renderCompanion() {
+  const sources = companion?.sources || {};
+  els.companionEnabled.checked = Boolean(companion?.enabled);
+  els.companionHost.value = companion?.host || '';
+  els.companionPort.value = companion?.port || 8000;
+  els.companionCut.value = companion?.transitions?.cut || '';
+  els.companionMixRate.value = companion?.transitions?.mixRate || '';
+  els.companionMixTrigger.value = companion?.transitions?.mixTrigger || '';
+
+  const sourceKeys = [...Array.from({ length: 20 }, (_, i) => String(i + 1)), 'WHITE', 'BLACK'];
+  els.companionSourceRows.innerHTML = sourceKeys.map(source => `
+    <label class="mapping-row">
+      <span>${escapeHtml(source)}</span>
+      <input data-companion-source="${escapeAttr(source)}" type="text" placeholder="1/2/3" value="${escapeAttr(sources[source] || '')}" />
+    </label>
+  `).join('');
+}
+
+async function saveCompanion(event) {
+  event.preventDefault();
+  const sources = {};
+  for (const input of els.companionSourceRows.querySelectorAll('[data-companion-source]')) {
+    sources[input.dataset.companionSource] = input.value.trim();
+  }
+
+  const next = {
+    enabled: els.companionEnabled.checked,
+    host: els.companionHost.value.trim(),
+    port: Number(els.companionPort.value) || 8000,
+    sources,
+    transitions: {
+      cut: els.companionCut.value.trim(),
+      mixRate: els.companionMixRate.value.trim(),
+      mixTrigger: els.companionMixTrigger.value.trim()
+    }
+  };
+
+  try {
+    const payload = await postJson('/api/companion', { companion: next });
+    companion = payload.companion || next;
+    renderCompanion();
+    els.companionStatus.textContent = `Saved Companion settings to ${payload.file || 'data/companion.json'}.`;
+    els.companionStatus.style.color = '#8ecbff';
+  } catch (err) {
+    els.companionStatus.textContent = err.message;
+    els.companionStatus.style.color = '#ff9a8c';
+  }
 }
 
 async function refreshActiveShowDetails() {

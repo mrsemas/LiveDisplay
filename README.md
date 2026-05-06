@@ -41,6 +41,18 @@ Timeline transitions are stored on each timeline as JSON. For now the only store
 - A mix stores the outgoing cue, incoming cue, and duration in frames.
 - Live view reads these records and draws fade ramps around the fixed playhead.
 
+## Companion
+
+Admin can save global Companion settings in `data/companion.json`.
+
+- Companion integration can be enabled or disabled from Admin.
+- Host and port point to the Companion HTTP server.
+- Button locations use `page/row/column`, for example `1/2/3`.
+- Sources `1` through `20`, `WHITE`, and `BLACK` can be mapped to Companion buttons.
+- Cut has one mapped button.
+- Mix has one mapped button for rate and one mapped button for trigger.
+- During playback the server presses mapped buttons when cue boundaries are crossed. If a mix is active, later source changes are held until the mix window ends.
+
 ## Install
 
 ```bash
