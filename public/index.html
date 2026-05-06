@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Waterfall Live</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="live-body">
+  <div id="app" class="app-shell">
+    <header class="topbar">
+      <div class="show-info">
+        <div class="eyebrow">LIVE WATERFALL</div>
+        <div id="showName" class="show-name">No show loaded</div>
+      </div>
+      <div class="clock-cluster">
+        <div id="statusPill" class="status-pill stopped">STOPPED</div>
+        <div id="mainClock" class="main-clock">01:00:00:00</div>
+        <div id="latency" class="latency">sync -- ms</div>
+      </div>
+    </header>
+
+    <section class="camera-strip" id="cameraStrip"></section>
+
+    <section class="pinned-wrap" id="pinnedWrap">
+      <div class="section-label">PINNED CAMERA</div>
+      <div id="pinnedRow" class="timeline-row pinned empty-row">
+        <div class="row-index">—</div>
+        <div class="source-cell empty-source">PIN</div>
+        <div class="count-cell">--</div>
+        <div class="track-area">
+          <div class="playhead"></div>
+          <div class="row-description empty-description">Pick a camera</div>
+        </div>
+      </div>
+    </section>
+
+    <main class="waterfall-wrap">
+      <div class="waterfall-header">
+        <div class="section-label">FULL WATERFALL</div>
+        <div class="zoom-control">
+          <button id="zoomOut" type="button">−</button>
+          <span id="zoomLabel">Normal</span>
+          <button id="zoomIn" type="button">+</button>
+        </div>
+      </div>
+      <div id="waterfall" class="waterfall"></div>
+    </main>
+
+    <footer class="bottom-hint">
+      <span id="timelineName">Timeline: —</span>
+      <span id="durationLabel">Duration: —</span>
+    </footer>
+  </div>
+
+  <script src="/live.js" type="module"></script>
+</body>
+</html>

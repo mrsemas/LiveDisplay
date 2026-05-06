@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Waterfall Admin</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="admin-body">
+  <div class="admin-shell">
+    <header class="admin-header">
+      <div>
+        <div class="eyebrow">ADMIN</div>
+        <h1>Waterfall Playback Control</h1>
+      </div>
+      <a class="open-live" href="/" target="_blank">Open Live View</a>
+    </header>
+
+    <section class="admin-card">
+      <h2>Show</h2>
+      <div class="form-grid">
+        <label>
+          Active show
+          <select id="showSelect"></select>
+        </label>
+        <button id="setActiveShow" type="button">Set Active</button>
+      </div>
+
+      <div class="form-grid create-show-row">
+        <label>
+          New show name
+          <input id="newShowName" type="text" placeholder="Concert / Sunday service / Youth night" />
+        </label>
+        <button id="createShow" type="button">Create Show</button>
+      </div>
+      <div id="showMeta" class="muted small-text">No show loaded.</div>
+    </section>
+
+    <section class="admin-card">
+      <h2>Import CSV Timeline / Song</h2>
+      <form id="importForm" class="import-form">
+        <label>
+          Timeline / song name
+          <input name="timelineName" id="timelineNameInput" type="text" placeholder="Song 01 - Opening" required />
+        </label>
+
+        <label>
+          CSV file
+          <input name="csv" id="csvInput" type="file" accept=".csv,text/csv" required />
+        </label>
+
+        <label>
+          Import mode
+          <select name="mode" id="importMode">
+            <option value="append">Append as new timeline</option>
+            <option value="replace">Replace selected timeline</option>
+          </select>
+        </label>
+
+        <label id="replaceLabel" class="hidden">
+          Timeline to replace
+          <select name="replaceTimelineId" id="replaceTimelineSelect"></select>
+        </label>
+
+        <button type="submit">Import</button>
+      </form>
+      <div id="importStatus" class="muted small-text">CSV columns: Index, Number, Name, Start, End, Duration, Color. FPS fixed at 25.</div>
+    </section>
+
+    <section class="admin-card">
+      <h2>Source Abbreviations</h2>
+      <p class="muted small-text abbr-help">Set short display labels for sources. Original names stay untouched in the imported data. Example: <strong>BLACK</strong> → <strong>BLK</strong>, <strong>WHITE</strong> → <strong>WHT</strong>, <strong>C1</strong> → <strong>CAM 1</strong>.</p>
+      <form id="abbreviationForm" class="abbr-form">
+        <div id="abbreviationRows" class="abbr-rows"></div>
+        <div class="abbr-actions">
+          <button id="addAbbreviation" type="button">Add Abbreviation</button>
+          <button type="submit" class="primary">Save Abbreviations</button>
+        </div>
+      </form>
+      <div id="abbreviationStatus" class="muted small-text">Saved to data/abbreviations.json.</div>
+    </section>
+
+    <section class="admin-card">
+      <h2>Playback</h2>
+      <div class="control-grid">
+        <button id="startBtn" type="button" class="primary">Start</button>
+        <button id="pauseBtn" type="button">Pause</button>
+        <button id="stopBtn" type="button">Stop</button>
+        <button id="resetBtn" type="button">Reset</button>
+      </div>
+      <div class="admin-clock-row">
+        <div>
+          <div class="eyebrow">STATE</div>
+          <div id="adminState" class="admin-big">STOPPED</div>
+        </div>
+        <div>
+          <div class="eyebrow">TIMECODE</div>
+          <div id="adminClock" class="admin-big">01:00:00:00</div>
+        </div>
+      </div>
+
+      <div class="scrub-panel">
+        <div class="scrub-head">
+          <div class="eyebrow">SCRUB</div>
+          <div id="scrubReadout" class="scrub-readout">01:00:00:00 / —</div>
+        </div>
+        <input id="scrubSlider" class="scrub-slider" type="range" min="0" max="0" step="1" value="0" />
+      </div>
+    </section>
+
+    <section class="admin-card">
+      <h2>Timelines in Active Show</h2>
+      <div id="timelineList" class="timeline-list"></div>
+    </section>
+  </div>
+
+  <script src="/admin.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "name": "liveedit-waterfall",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "LAN browser waterfall timeline for camera shot cueing with server-side playback sync.",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "csv-parse": "^5.5.6",
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
