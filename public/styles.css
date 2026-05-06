@@ -573,9 +573,24 @@ button:active { transform: translateY(1px); }
   border: 1px solid #252525;
 }
 .timeline-number {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: #aaa;
   font-variant-numeric: tabular-nums;
   font-weight: 800;
+}
+.drag-handle {
+  cursor: grab;
+  color: #666;
+  font-size: 16px;
+  line-height: 1;
+}
+.timeline-item.dragging {
+  opacity: .55;
+}
+.timeline-item.drag-over {
+  border-color: #555;
 }
 .timeline-title { font-weight: 800; }
 .timeline-meta { color: #888; font-size: 13px; font-variant-numeric: tabular-nums; }

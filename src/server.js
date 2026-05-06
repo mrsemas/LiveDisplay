@@ -679,6 +679,29 @@ app.post('/api/import', upload.single('csv'), (req, res) => {
   }
 });
 
+app.post('/api/shows/:showId/timelines/reorder', (req, res) => {
+  const show = getShow(String(req.params.showId || ''));
+  if (!show) return res.status(404).json({ error: 'Show not found.' });
+
+  const timelineIds = Array.isArray(req.body?.timelineIds)
+    ? req.body.timelineIds.map(id => String(id || ''))
+    : [];
+
+  const currentIds = new Set(show.timelines.map(t => t.id));
+  if (timelineIds.length !== show.timelines.length || timelineIds.some(id => !currentIds.has(id))) {
+    return res.status(400).json({ error: 'timelineIds must include every timeline exactly once.' });
+  }
+
+  const byId = new Map(show.timelines.map(timeline => [timeline.id, timeline]));
+  show.timelines = timelineIds.map(id => byId.get(id));
+  show.updatedAt = new Date().toISOString();
+  recomputeTimelineOffsets(show);
+  saveStore();
+  afterShowTimelineChange(show);
+
+  res.json({ ok: true, show: showPayload(show).show });
+});
+
 app.post('/api/shows/:showId/timelines/:timelineId', upload.single('csv'), (req, res) => {
   const show = getShow(String(req.params.showId || ''));
   if (!show) return res.status(404).json({ error: 'Show not found.' });

@@ -17,6 +17,34 @@
     </header>
 
     <section class="admin-card">
+      <h2>Playback</h2>
+      <div class="control-grid">
+        <button id="startBtn" type="button" class="primary">Start</button>
+        <button id="pauseBtn" type="button">Pause</button>
+        <button id="stopBtn" type="button">Stop</button>
+        <button id="resetBtn" type="button">Reset</button>
+      </div>
+      <div class="admin-clock-row">
+        <div>
+          <div class="eyebrow">STATE</div>
+          <div id="adminState" class="admin-big">STOPPED</div>
+        </div>
+        <div>
+          <div class="eyebrow">TIMECODE</div>
+          <div id="adminClock" class="admin-big">01:00:00:00</div>
+        </div>
+      </div>
+
+      <div class="scrub-panel">
+        <div class="scrub-head">
+          <div class="eyebrow">SCRUB</div>
+          <div id="scrubReadout" class="scrub-readout">01:00:00:00 / —</div>
+        </div>
+        <input id="scrubSlider" class="scrub-slider" type="range" min="0" max="0" step="1" value="0" />
+      </div>
+    </section>
+
+    <section class="admin-card">
       <h2>Show</h2>
       <div class="form-grid">
         <label>
@@ -127,34 +155,6 @@
         </div>
       </form>
       <div id="companionStatus" class="muted small-text">Locations use page/row/column, for example 1/2/3.</div>
-    </section>
-
-    <section class="admin-card">
-      <h2>Playback</h2>
-      <div class="control-grid">
-        <button id="startBtn" type="button" class="primary">Start</button>
-        <button id="pauseBtn" type="button">Pause</button>
-        <button id="stopBtn" type="button">Stop</button>
-        <button id="resetBtn" type="button">Reset</button>
-      </div>
-      <div class="admin-clock-row">
-        <div>
-          <div class="eyebrow">STATE</div>
-          <div id="adminState" class="admin-big">STOPPED</div>
-        </div>
-        <div>
-          <div class="eyebrow">TIMECODE</div>
-          <div id="adminClock" class="admin-big">01:00:00:00</div>
-        </div>
-      </div>
-
-      <div class="scrub-panel">
-        <div class="scrub-head">
-          <div class="eyebrow">SCRUB</div>
-          <div id="scrubReadout" class="scrub-readout">01:00:00:00 / —</div>
-        </div>
-        <input id="scrubSlider" class="scrub-slider" type="range" min="0" max="0" step="1" value="0" />
-      </div>
     </section>
 
     <section class="admin-card">

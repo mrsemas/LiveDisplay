@@ -9,6 +9,7 @@ let companion = null;
 let isScrubbing = false;
 let pendingSeekTimer = null;
 let lastSeekSentAt = 0;
+let draggedTimelineId = null;
 
 const els = {
   showSelect: document.getElementById('showSelect'),
@@ -313,8 +314,11 @@ function renderTimelineList(timelines) {
   }
   const showId = showsPayload?.activeShowId || els.showSelect.value;
   els.timelineList.innerHTML = timelines.map((t, i) => `
-    <div class="timeline-item">
-      <div class="timeline-number">${i + 1}</div>
+    <div class="timeline-item" draggable="true" data-timeline-id="${escapeAttr(t.id)}">
+      <div class="timeline-number">
+        <span class="drag-handle" title="Drag to reorder">☰</span>
+        <span>${i + 1}</span>
+      </div>
       <div>
         <div class="timeline-title">${escapeHtml(t.name)}</div>
         <div class="timeline-meta">Start ${escapeHtml(t.startTimecode)} · Duration ${escapeHtml(t.durationTimecode)} · ${t.entryCount} entries</div>
@@ -330,6 +334,7 @@ function renderTimelineList(timelines) {
   for (const button of els.timelineList.querySelectorAll('[data-remove-timeline]')) {
     button.addEventListener('click', () => removeTimeline(button.dataset.removeTimeline, button.dataset.timelineName));
   }
+  wireTimelineDragHandlers();
 }
 
 function renderReplaceSelect(timelines) {
@@ -401,6 +406,58 @@ async function removeTimeline(timelineId, timelineName) {
   }
 }
 
+function wireTimelineDragHandlers() {
+  for (const item of els.timelineList.querySelectorAll('.timeline-item[draggable="true"]')) {
+    item.addEventListener('dragstart', event => {
+      draggedTimelineId = item.dataset.timelineId;
+      item.classList.add('dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', draggedTimelineId);
+    });
+
+    item.addEventListener('dragend', () => {
+      item.classList.remove('dragging');
+      draggedTimelineId = null;
+      els.timelineList.querySelectorAll('.timeline-item').forEach(row => row.classList.remove('drag-over'));
+    });
+
+    item.addEventListener('dragover', event => {
+      event.preventDefault();
+      if (!draggedTimelineId || item.dataset.timelineId === draggedTimelineId) return;
+      item.classList.add('drag-over');
+      const dragged = els.timelineList.querySelector(`[data-timeline-id="${cssEscape(draggedTimelineId)}"]`);
+      if (!dragged) return;
+      const rect = item.getBoundingClientRect();
+      const after = event.clientY > rect.top + rect.height / 2;
+      els.timelineList.insertBefore(dragged, after ? item.nextSibling : item);
+    });
+
+    item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
+
+    item.addEventListener('drop', async event => {
+      event.preventDefault();
+      item.classList.remove('drag-over');
+      await saveTimelineOrder();
+    });
+  }
+}
+
+async function saveTimelineOrder() {
+  const showId = showsPayload?.activeShowId || els.showSelect.value;
+  const timelineIds = [...els.timelineList.querySelectorAll('.timeline-item[data-timeline-id]')]
+    .map(item => item.dataset.timelineId);
+  if (!showId || !timelineIds.length) return;
+
+  try {
+    await postJson(`/api/shows/${encodeURIComponent(showId)}/timelines/reorder`, { timelineIds });
+    setStatus('Timeline order saved.');
+    await refreshAll();
+  } catch (err) {
+    setStatus(err.message, true);
+    await refreshActiveShowDetails();
+  }
+}
+
 async function control(action) {
   try {
     const payload = await postJson('/api/control', { action });
@@ -449,3 +506,7 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 }
 function escapeAttr(value) { return escapeHtml(value).replace(/'/g, '&#39;'); }
+function cssEscape(value) {
+  if (window.CSS?.escape) return CSS.escape(value);
+  return String(value).replace(/["\\]/g, '\\$&');
+}
