@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/AtemEdit.iml" filepath="$PROJECT_DIR$/AtemEdit.iml" />
+      <module fileurl="file://$PROJECT_DIR$/LiveDisplay.iml" filepath="$PROJECT_DIR$/LiveDisplay.iml" />
     </modules>
   </component>
 </project>
