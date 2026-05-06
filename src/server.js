@@ -142,6 +142,32 @@ function getShow(showId) {
   return store.shows.find(s => s.id === showId) || null;
 }
 
+function getTimeline(show, timelineId) {
+  return show?.timelines?.find(t => t.id === timelineId) || null;
+}
+
+function timelinePayload(timeline) {
+  return {
+    id: timeline.id,
+    name: timeline.name,
+    importedAt: timeline.importedAt,
+    sourceFirstTimecode: timeline.sourceFirstTimecode,
+    offsetFrames: timeline.offsetFrames || 0,
+    durationFrames: timeline.durationFrames || 0,
+    startTimecode: framesToTimecode(BASE_FRAMES + (timeline.offsetFrames || 0), FPS),
+    durationTimecode: framesToTimecode(timeline.durationFrames || 0, FPS),
+    entryCount: timeline.entries?.length || 0,
+    entries: timeline.entries || []
+  };
+}
+
+function afterShowTimelineChange(show) {
+  if (store.activeShowId !== show.id) return;
+  setPlaybackPosition(currentPositionMs());
+  broadcastShow();
+  broadcastState();
+}
+
 function getShowDurationFrames(show) {
   if (!show || !show.timelines?.length) return 0;
   const last = show.timelines.at(-1);
@@ -280,6 +306,10 @@ app.get('/admin', (_req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'admin.html'));
 });
 
+app.get('/admin/timeline', (_req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, 'admin-timeline.html'));
+});
+
 app.get('/api/shows', (_req, res) => {
   res.json({
     fps: FPS,
@@ -335,6 +365,16 @@ app.post('/api/active-show', (req, res) => {
 
 app.get('/api/show', (_req, res) => {
   res.json(showPayload());
+});
+
+app.get('/api/shows/:showId/timelines/:timelineId', (req, res) => {
+  const show = getShow(String(req.params.showId || ''));
+  if (!show) return res.status(404).json({ error: 'Show not found.' });
+
+  const timeline = getTimeline(show, String(req.params.timelineId || ''));
+  if (!timeline) return res.status(404).json({ error: 'Timeline not found.' });
+
+  res.json({ ok: true, show: showPayload(show).show, timeline: timelinePayload(timeline) });
 });
 
 app.get('/api/state', (_req, res) => {
@@ -394,6 +434,55 @@ app.post('/api/import', upload.single('csv'), (req, res) => {
     console.error(err);
     res.status(400).json({ error: err.message || 'CSV import failed.' });
   }
+});
+
+app.post('/api/shows/:showId/timelines/:timelineId', upload.single('csv'), (req, res) => {
+  const show = getShow(String(req.params.showId || ''));
+  if (!show) return res.status(404).json({ error: 'Show not found.' });
+
+  const timelineId = String(req.params.timelineId || '');
+  const idx = show.timelines.findIndex(t => t.id === timelineId);
+  if (idx < 0) return res.status(404).json({ error: 'Timeline not found.' });
+
+  const timelineName = String(req.body?.timelineName || '').trim();
+  if (!timelineName) return res.status(400).json({ error: 'Timeline/song name is required.' });
+
+  try {
+    if (req.file?.buffer) {
+      const parsedTimeline = parseCsvTimeline(req.file.buffer.toString('utf8'), timelineName);
+      parsedTimeline.id = timelineId;
+      show.timelines[idx] = parsedTimeline;
+    } else {
+      show.timelines[idx].name = timelineName;
+    }
+
+    show.updatedAt = new Date().toISOString();
+    recomputeTimelineOffsets(show);
+    saveStore();
+    afterShowTimelineChange(show);
+
+    res.json({ ok: true, show: showPayload(show).show, timeline: timelinePayload(show.timelines[idx]) });
+  } catch (err) {
+    console.error(err);
+    res.status(400).json({ error: err.message || 'Timeline update failed.' });
+  }
+});
+
+app.delete('/api/shows/:showId/timelines/:timelineId', (req, res) => {
+  const show = getShow(String(req.params.showId || ''));
+  if (!show) return res.status(404).json({ error: 'Show not found.' });
+
+  const timelineId = String(req.params.timelineId || '');
+  const idx = show.timelines.findIndex(t => t.id === timelineId);
+  if (idx < 0) return res.status(404).json({ error: 'Timeline not found.' });
+
+  const [removed] = show.timelines.splice(idx, 1);
+  show.updatedAt = new Date().toISOString();
+  recomputeTimelineOffsets(show);
+  saveStore();
+  afterShowTimelineChange(show);
+
+  res.json({ ok: true, removedTimelineId: removed.id, show: showPayload(show).show });
 });
 
 app.post('/api/control', (req, res) => {

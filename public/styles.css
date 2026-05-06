@@ -413,6 +413,7 @@ button {
   font-weight: 800;
 }
 button.primary { background: #195d20; border-color: #2b8234; }
+button.danger, .timeline-action.danger { background: #4d1511; border-color: #7b2a22; }
 button:active { transform: translateY(1px); }
 .muted { color: #888; }
 .small-text { font-size: 13px; }
@@ -505,7 +506,7 @@ button:active { transform: translateY(1px); }
 }
 .timeline-item {
   display: grid;
-  grid-template-columns: 48px 1fr auto auto;
+  grid-template-columns: 48px minmax(0, 1fr) minmax(120px, auto) auto;
   gap: 10px;
   align-items: center;
   padding: 10px;
@@ -520,6 +521,67 @@ button:active { transform: translateY(1px); }
 }
 .timeline-title { font-weight: 800; }
 .timeline-meta { color: #888; font-size: 13px; font-variant-numeric: tabular-nums; }
+.timeline-actions, .form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.timeline-action {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid #3a3a3a;
+  background: #252525;
+  color: #fff;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 800;
+}
+.timeline-edit-form {
+  display: grid;
+  gap: 12px;
+}
+.cue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cue-item {
+  display: grid;
+  grid-template-columns: 42px 78px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: #0e0e0e;
+  border: 1px solid #252525;
+}
+.cue-number {
+  color: #888;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.cue-source {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: #fff;
+  font-weight: 850;
+}
+.cue-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 800;
+}
 
 @media (max-width: 760px) {
   :root {
@@ -551,4 +613,11 @@ button:active { transform: translateY(1px); }
   .abbr-remove { grid-column: 1 / -1; }
   .admin-clock-row { grid-template-columns: 1fr; }
   .timeline-item { grid-template-columns: 38px 1fr; }
+  .timeline-actions {
+    grid-column: 1 / -1;
+    justify-content: stretch;
+  }
+  .timeline-action { flex: 1; }
+  .form-actions { align-items: stretch; flex-direction: column; }
+  .cue-item { grid-template-columns: 34px 64px minmax(0, 1fr); }
 }

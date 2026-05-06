@@ -236,6 +236,7 @@ function renderTimelineList(timelines) {
     els.timelineList.innerHTML = '<div class="muted small-text">No timelines imported yet.</div>';
     return;
   }
+  const showId = showsPayload?.activeShowId || els.showSelect.value;
   els.timelineList.innerHTML = timelines.map((t, i) => `
     <div class="timeline-item">
       <div class="timeline-number">${i + 1}</div>
@@ -244,9 +245,16 @@ function renderTimelineList(timelines) {
         <div class="timeline-meta">Start ${escapeHtml(t.startTimecode)} · Duration ${escapeHtml(t.durationTimecode)} · ${t.entryCount} entries</div>
       </div>
       <div class="timeline-meta">${escapeHtml(t.id)}</div>
-      <div class="timeline-meta">${Math.round((t.durationFrames || 0) / FPS)}s</div>
+      <div class="timeline-actions">
+        <a class="timeline-action" href="/admin/timeline?showId=${encodeURIComponent(showId)}&timelineId=${encodeURIComponent(t.id)}">Edit</a>
+        <button class="timeline-action danger" type="button" data-remove-timeline="${escapeAttr(t.id)}" data-timeline-name="${escapeAttr(t.name)}">Remove</button>
+      </div>
     </div>
   `).join('');
+
+  for (const button of els.timelineList.querySelectorAll('[data-remove-timeline]')) {
+    button.addEventListener('click', () => removeTimeline(button.dataset.removeTimeline, button.dataset.timelineName));
+  }
 }
 
 function renderReplaceSelect(timelines) {
@@ -295,6 +303,23 @@ async function importCsv(event) {
     setStatus('Imported successfully. Playback reset to start.');
     els.importForm.reset();
     updateReplaceVisibility();
+    await refreshAll();
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+}
+
+async function removeTimeline(timelineId, timelineName) {
+  const showId = showsPayload?.activeShowId || els.showSelect.value;
+  if (!showId || !timelineId) return;
+  if (!confirm(`Remove timeline "${timelineName}" from this show?`)) return;
+
+  setStatus(`Removing ${timelineName}...`);
+  try {
+    const res = await fetch(`/api/shows/${encodeURIComponent(showId)}/timelines/${encodeURIComponent(timelineId)}`, { method: 'DELETE' });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error || 'Remove failed.');
+    setStatus(`Removed timeline: ${timelineName}`);
     await refreshAll();
   } catch (err) {
     setStatus(err.message, true);

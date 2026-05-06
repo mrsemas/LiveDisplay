@@ -8,6 +8,7 @@ A local-LAN browser app for camera shot cueing.
 - Camera operators can pin cameras like `C1`, `C2`, etc. while still seeing the full waterfall underneath.
 - The pinned camera row now shows that camera's upcoming shot bars on the same horizontal time scale.
 - Admin has a scrub slider for jumping through the active show timeline.
+- Timelines can be opened from the admin list for renaming, CSV replacement, and removal.
 - FPS is fixed at **25 fps**.
 - Show timecode starts at **01:00:00:00**.
 
@@ -69,8 +70,9 @@ http://192.168.1.50:3000/
 2. Create/select a show.
 3. Import a CSV with a timeline/song name.
 4. Append more CSVs as more timelines/songs, or replace an existing timeline.
-5. Use Start/Pause/Stop/Reset, or scrub with the slider.
-6. Operators open `/` on iPad/iPhone and pick their pinned camera.
+5. Use the timeline list to edit names, replace CSV data, or remove timelines.
+6. Use Start/Pause/Stop/Reset, or scrub with the slider.
+7. Operators open `/` on iPad/iPhone and pick their pinned camera.
 
 ## Storage
 

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Edit Timeline</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="admin-body">
+  <div class="admin-shell">
+    <header class="admin-header">
+      <div>
+        <div class="eyebrow">TIMELINE</div>
+        <h1 id="pageTitle">Edit Timeline</h1>
+      </div>
+      <a class="open-live" href="/admin">Back to Admin</a>
+    </header>
+
+    <section class="admin-card">
+      <h2>Timeline Details</h2>
+      <div id="timelineMeta" class="muted small-text">Loading timeline...</div>
+    </section>
+
+    <section class="admin-card">
+      <h2>Edit Timeline</h2>
+      <form id="timelineForm" class="timeline-edit-form">
+        <label>
+          Timeline / song name
+          <input id="timelineNameInput" name="timelineName" type="text" required />
+        </label>
+
+        <label>
+          Replace CSV
+          <input id="csvInput" name="csv" type="file" accept=".csv,text/csv" />
+        </label>
+
+        <div class="form-actions">
+          <button id="saveTimeline" class="primary" type="submit">Save Timeline</button>
+          <button id="removeTimeline" class="danger" type="button">Remove Timeline</button>
+        </div>
+      </form>
+      <div id="timelineStatus" class="muted small-text">Choose a CSV only when you want to replace the imported cues.</div>
+    </section>
+
+    <section class="admin-card">
+      <h2>Cues</h2>
+      <div id="cueList" class="cue-list"></div>
+    </section>
+  </div>
+
+  <script src="/admin-timeline.js" type="module"></script>
+</body>
+</html>
