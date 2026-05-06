@@ -83,6 +83,9 @@ function ensureStoreShape(input) {
     show.timelines ||= [];
     show.createdAt ||= new Date().toISOString();
     show.updatedAt ||= new Date().toISOString();
+    for (const timeline of show.timelines) {
+      timeline.transitions = normalizeTransitions(timeline.transitions || []);
+    }
   }
 
   const output = {
@@ -157,6 +160,7 @@ function timelinePayload(timeline) {
     startTimecode: framesToTimecode(BASE_FRAMES + (timeline.offsetFrames || 0), FPS),
     durationTimecode: framesToTimecode(timeline.durationFrames || 0, FPS),
     entryCount: timeline.entries?.length || 0,
+    transitions: normalizeTransitions(timeline.transitions || []),
     entries: timeline.entries || []
   };
 }
@@ -209,9 +213,18 @@ function flattenShow(show) {
   const rows = [];
 
   for (const timeline of show.timelines || []) {
+    const transitionByIncoming = new Map();
+    const transitionByOutgoing = new Map();
+    for (const transition of normalizeTransitions(timeline.transitions || [])) {
+      transitionByIncoming.set(transition.toEntryId, transition);
+      transitionByOutgoing.set(transition.fromEntryId, transition);
+    }
+
     for (const entry of timeline.entries || []) {
       const showStartFrames = (timeline.offsetFrames || 0) + entry.relativeStartFrames;
       const showEndFrames = (timeline.offsetFrames || 0) + entry.relativeEndFrames;
+      const transitionIn = transitionByIncoming.get(entry.id) || null;
+      const transitionOut = transitionByOutgoing.get(entry.id) || null;
       const startMs = framesToMs(showStartFrames, FPS);
       const endMs = framesToMs(showEndFrames, FPS);
       rows.push({
@@ -223,6 +236,9 @@ function flattenShow(show) {
         showEndFrames,
         startMs,
         endMs,
+        renderEndMs: endMs + (transitionOut ? framesToMs(transitionOut.durationFrames, FPS) : 0),
+        transitionIn: transitionIn ? transitionPayloadForEntry(transitionIn, timeline.offsetFrames || 0, timeline.entries || []) : null,
+        transitionOut: transitionOut ? transitionPayloadForEntry(transitionOut, timeline.offsetFrames || 0, timeline.entries || []) : null,
         showStartTimecode: framesToTimecode(BASE_FRAMES + showStartFrames, FPS),
         showEndTimecode: framesToTimecode(BASE_FRAMES + showEndFrames, FPS)
       });
@@ -253,7 +269,8 @@ function showPayload(show = getActiveShow()) {
         durationFrames: t.durationFrames || 0,
         startTimecode: framesToTimecode(BASE_FRAMES + (t.offsetFrames || 0), FPS),
         durationTimecode: framesToTimecode(t.durationFrames || 0, FPS),
-        entryCount: t.entries?.length || 0
+        entryCount: t.entries?.length || 0,
+        transitionCount: normalizeTransitions(t.transitions || []).length
       }))
     } : null,
     durationFrames: getShowDurationFrames(show),
@@ -468,6 +485,24 @@ app.post('/api/shows/:showId/timelines/:timelineId', upload.single('csv'), (req,
   }
 });
 
+app.post('/api/shows/:showId/timelines/:timelineId/transitions', (req, res) => {
+  const show = getShow(String(req.params.showId || ''));
+  if (!show) return res.status(404).json({ error: 'Show not found.' });
+
+  const timeline = getTimeline(show, String(req.params.timelineId || ''));
+  if (!timeline) return res.status(404).json({ error: 'Timeline not found.' });
+
+  try {
+    timeline.transitions = normalizeTransitions(req.body?.transitions || [], timeline.entries || []);
+    show.updatedAt = new Date().toISOString();
+    saveStore();
+    afterShowTimelineChange(show);
+    res.json({ ok: true, show: showPayload(show).show, timeline: timelinePayload(timeline) });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Transition update failed.' });
+  }
+});
+
 app.delete('/api/shows/:showId/timelines/:timelineId', (req, res) => {
   const show = getShow(String(req.params.showId || ''));
   if (!show) return res.status(404).json({ error: 'Show not found.' });
@@ -607,7 +642,58 @@ function parseCsvTimeline(csvText, timelineName) {
     sourceFirstTimecode: records[0].Start,
     durationFrames: lastEnd,
     offsetFrames: 0,
+    transitions: [],
     entries
+  };
+}
+
+function normalizeTransitions(input, entries = []) {
+  if (!Array.isArray(input)) return [];
+  const entryIds = new Set(entries.map(entry => entry.id));
+  const normalized = [];
+  const seen = new Set();
+
+  for (const transition of input) {
+    const type = String(transition?.type || '').trim().toLowerCase();
+    if (type !== 'mix') continue;
+
+    const fromEntryId = String(transition?.fromEntryId || '').trim();
+    const toEntryId = String(transition?.toEntryId || '').trim();
+    if (!fromEntryId || !toEntryId || fromEntryId === toEntryId) continue;
+    if (entryIds.size && (!entryIds.has(fromEntryId) || !entryIds.has(toEntryId))) continue;
+
+    const durationFrames = Math.max(1, Math.round(Number(transition?.durationFrames) || FPS));
+    const id = String(transition?.id || '').trim() || newId('transition');
+    const key = `${fromEntryId}->${toEntryId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    normalized.push({
+      id,
+      type: 'mix',
+      fromEntryId,
+      toEntryId,
+      durationFrames
+    });
+  }
+
+  return normalized;
+}
+
+function transitionPayloadForEntry(transition, timelineOffsetFrames, entries) {
+  const incoming = entries.find(entry => entry.id === transition.toEntryId);
+  const showStartFrames = timelineOffsetFrames + (incoming?.relativeStartFrames || 0);
+  return {
+    id: transition.id,
+    type: transition.type,
+    fromEntryId: transition.fromEntryId,
+    toEntryId: transition.toEntryId,
+    durationFrames: transition.durationFrames,
+    durationMs: framesToMs(transition.durationFrames, FPS),
+    showStartFrames,
+    showEndFrames: showStartFrames + transition.durationFrames,
+    startMs: framesToMs(showStartFrames, FPS),
+    endMs: framesToMs(showStartFrames + transition.durationFrames, FPS)
   };
 }
 

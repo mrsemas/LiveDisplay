@@ -9,6 +9,7 @@ A local-LAN browser app for camera shot cueing.
 - The pinned camera row now shows that camera's upcoming shot bars on the same horizontal time scale.
 - Admin has a scrub slider for jumping through the active show timeline.
 - Timelines can be opened from the admin list for renaming, CSV replacement, and removal.
+- Timeline edit pages can store mix transitions between adjacent cues; cut boundaries store no transition.
 - FPS is fixed at **25 fps**.
 - Show timecode starts at **01:00:00:00**.
 
@@ -31,6 +32,14 @@ The app parses cameras from the beginning of the `Name` field:
 - `C1 — slow zoom in` → camera `C1`, description `slow zoom in`
 - `C2 — zoom out` → camera `C2`, description `zoom out`
 - `WHITE` / `BLACK` are shown in the waterfall but are not pinnable and do not show descriptions.
+
+## Transitions
+
+Timeline transitions are stored on each timeline as JSON. For now the only stored transition type is `mix`.
+
+- A cut has no transition record.
+- A mix stores the outgoing cue, incoming cue, and duration in frames.
+- Live view reads these records and draws fade ramps around the fixed playhead.
 
 ## Install
 

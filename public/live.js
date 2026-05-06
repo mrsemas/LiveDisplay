@@ -229,7 +229,7 @@ function renderPinnedRow() {
 
   const entries = showData.entries || [];
   const cameraEntries = entries.filter(e => e.source === selectedCamera);
-  const active = cameraEntries.find(e => e.startMs <= localPositionMs && e.endMs > localPositionMs);
+  const active = cameraEntries.find(e => e.startMs <= localPositionMs && (e.renderEndMs || e.endMs) > localPositionMs);
   const next = cameraEntries.find(e => e.startMs > localPositionMs);
   const ref = active || next;
   const color = findColorForSource(selectedCamera) || '#333';
@@ -243,21 +243,18 @@ function renderPinnedRow() {
 
   const isLive = Boolean(active);
   const countdown = isLive
-    ? formatCountdown(ref.endMs - localPositionMs)
+    ? formatCountdown((ref.renderEndMs || ref.endMs) - localPositionMs)
     : formatCountdown(ref.startMs - localPositionMs);
 
   const countClass = isLive
-    ? `live ${ref.endMs - localPositionMs < 3500 ? 'warn' : ''}`
+    ? `live ${(ref.renderEndMs || ref.endMs) - localPositionMs < 3500 ? 'warn' : ''}`
     : 'future';
 
   const bars = cameraEntries
-    .filter(entry => entry.endMs > localPositionMs - 80)
+    .filter(entry => (entry.renderEndMs || entry.endMs) > localPositionMs - 80)
     .map(entry => {
-      const entryLive = entry.startMs <= localPositionMs && entry.endMs > localPositionMs;
-      const left = barLeftPx(entry.startMs, localPositionMs);
-      const width = Math.max(18, (entry.endMs - entry.startMs) / 1000 * currentZoom().pxPerSecond);
-      const barClass = entryLive ? 'shot-bar' : 'shot-bar ghost';
-      return `<div class="${barClass}" style="left:${left}px;width:${width}px;background:${escapeAttr(entry.color || color)}"></div>`;
+      const entryLive = entry.startMs <= localPositionMs && (entry.renderEndMs || entry.endMs) > localPositionMs;
+      return cueGeometryHtml(entry, localPositionMs, entry.color || color, entryLive);
     })
     .join('');
 
@@ -279,12 +276,12 @@ function renderWaterfallRows(force = false) {
   const rowHeight = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--row-h')) || 49;
   const maxRows = Math.max(1, Math.floor(els.waterfall.clientHeight / rowHeight));
 
-  let visible = entries.filter(e => e.endMs > localPositionMs - 80);
+  let visible = entries.filter(e => (e.renderEndMs || e.endMs) > localPositionMs - 80);
   if (!visible.length && entries.length) visible = [entries.at(-1)];
   visible = visible.slice(0, maxRows + 1);
 
   const html = visible.map((entry, i) => {
-    const isLive = entry.startMs <= localPositionMs && entry.endMs > localPositionMs;
+    const isLive = entry.startMs <= localPositionMs && (entry.renderEndMs || entry.endMs) > localPositionMs;
     return rowHtml(entry, i + 1, localPositionMs, false, isLive, entry.source);
   }).join('');
 
@@ -295,17 +292,15 @@ function renderWaterfallRows(force = false) {
 function rowHtml(entry, displayIndex, nowMs, pinned, isLive, sourceOverride) {
   const color = entry.color || '#666';
   const desc = formatDescription(entry, pinned, isLive);
+  const effectiveEndMs = entry.renderEndMs || entry.endMs;
   const countLabel = isLive
-    ? formatCountdown(entry.endMs - nowMs)
+    ? formatCountdown(effectiveEndMs - nowMs)
     : formatDuration(entry.endMs - entry.startMs);
 
   const countClass = isLive
-    ? `live ${entry.endMs - nowMs < 3500 ? 'warn' : ''}`
+    ? `live ${effectiveEndMs - nowMs < 3500 ? 'warn' : ''}`
     : 'duration';
 
-  const left = barLeftPx(entry.startMs, nowMs);
-  const width = Math.max(18, (entry.endMs - entry.startMs) / 1000 * currentZoom().pxPerSecond);
-  const barClass = isLive ? 'shot-bar' : 'shot-bar ghost';
   const rowClass = pinned ? `timeline-row pinned ${isLive ? 'current' : 'future'}` : `timeline-row ${isLive ? 'current' : 'future'}`;
   const indexLabel = pinned ? 'PIN' : displayIndex;
   const source = sourceOverride || entry.source || '—';
@@ -318,7 +313,7 @@ function rowHtml(entry, displayIndex, nowMs, pinned, isLive, sourceOverride) {
       <div class="count-cell ${countClass}">${escapeHtml(countLabel)}</div>
       <div class="track-area">
         <div class="playhead"></div>
-        <div class="${barClass}" style="left:${left}px;width:${width}px;background:${escapeAttr(color)}"></div>
+        ${cueGeometryHtml(entry, nowMs, color, isLive)}
         <div class="row-description">${desc}</div>
       </div>
     </div>
@@ -347,6 +342,43 @@ function formatDescription(entry, pinned, isLive) {
   const status = pinned ? `<span class="timeline-chip">${isLive ? 'ON AIR' : 'STANDBY'}</span>` : '';
   const description = entry.description || '';
   return `${status}${escapeHtml(description)}`;
+}
+
+function cueGeometryHtml(entry, nowMs, color, isLive) {
+  const parts = [];
+  const fadeInEnd = entry.transitionIn ? entry.transitionIn.endMs : entry.startMs;
+  const fadeOutStart = entry.transitionOut ? entry.transitionOut.startMs : entry.endMs;
+  const holdStart = Math.max(entry.startMs, fadeInEnd);
+  const holdEnd = Math.max(holdStart, fadeOutStart);
+  const partClass = isLive ? 'shot-bar' : 'shot-bar ghost';
+
+  if (entry.transitionIn) {
+    parts.push(shotPartHtml('shot-ramp ramp-in', entry.transitionIn.startMs, entry.transitionIn.endMs, nowMs, color, partClass));
+  }
+
+  if (holdEnd > holdStart) {
+    const squareClass = [
+      entry.transitionIn ? 'square-left' : '',
+      entry.transitionOut ? 'square-right' : ''
+    ].filter(Boolean).join(' ');
+    parts.push(shotPartHtml(squareClass, holdStart, holdEnd, nowMs, color, partClass));
+  }
+
+  if (entry.transitionOut) {
+    parts.push(shotPartHtml('shot-ramp ramp-out', entry.transitionOut.startMs, entry.transitionOut.endMs, nowMs, color, partClass));
+  }
+
+  if (!parts.length) {
+    parts.push(shotPartHtml('', entry.startMs, entry.endMs, nowMs, color, partClass));
+  }
+
+  return parts.join('');
+}
+
+function shotPartHtml(shapeClass, startMs, endMs, nowMs, color, partClass) {
+  const left = barLeftPx(startMs, nowMs);
+  const width = Math.max(2, (endMs - startMs) / 1000 * currentZoom().pxPerSecond);
+  return `<div class="${partClass} ${shapeClass}" style="left:${left}px;width:${width}px;background:${escapeAttr(color)}"></div>`;
 }
 
 function barLeftPx(entryStartMs, nowMs) {

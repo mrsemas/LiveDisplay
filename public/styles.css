@@ -292,8 +292,25 @@ button, input, select { font: inherit; }
   border-radius: 0 4px 4px 0;
   opacity: .88;
 }
-.timeline-row.pinned .shot-bar { border-radius: 5px; top: 7px; height: calc(100% - 14px); opacity: .95; }
+.timeline-row.pinned .shot-bar { border-radius: 0; top: 7px; height: calc(100% - 14px); opacity: .95; }
 .shot-bar.ghost { opacity: .45; }
+.shot-bar.square-left {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.shot-bar.square-right {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.shot-ramp {
+  border-radius: 0;
+}
+.ramp-in {
+  clip-path: polygon(0 100%, 100% 0, 100% 100%);
+}
+.ramp-out {
+  clip-path: polygon(0 0, 100% 100%, 0 100%);
+}
 
 .row-description {
   position: absolute;
@@ -582,6 +599,25 @@ button:active { transform: translateY(1px); }
   white-space: nowrap;
   font-weight: 800;
 }
+.transition-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 120px 160px;
+  gap: 10px;
+  align-items: end;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: #121212;
+  border: 1px solid #292929;
+}
+.transition-label {
+  color: #aaa;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  align-self: center;
+}
+.transition-duration {
+  font-size: 12px;
+}
 
 @media (max-width: 760px) {
   :root {
@@ -620,4 +656,5 @@ button:active { transform: translateY(1px); }
   .timeline-action { flex: 1; }
   .form-actions { align-items: stretch; flex-direction: column; }
   .cue-item { grid-template-columns: 34px 64px minmax(0, 1fr); }
+  .transition-row { grid-template-columns: 1fr; }
 }

@@ -1,8 +1,10 @@
+const FPS = 25;
 const params = new URLSearchParams(location.search);
 const showId = params.get('showId') || '';
 const timelineId = params.get('timelineId') || '';
 
 let timeline = null;
+let transitionSaveTimer = null;
 
 const els = {
   pageTitle: document.getElementById('pageTitle'),
@@ -12,11 +14,14 @@ const els = {
   csvInput: document.getElementById('csvInput'),
   removeTimeline: document.getElementById('removeTimeline'),
   timelineStatus: document.getElementById('timelineStatus'),
+  transitionStatus: document.getElementById('transitionStatus'),
   cueList: document.getElementById('cueList')
 };
 
 els.timelineForm.addEventListener('submit', saveTimeline);
 els.removeTimeline.addEventListener('click', removeTimeline);
+els.cueList.addEventListener('change', onTransitionEdit);
+els.cueList.addEventListener('input', onTransitionEdit);
 
 await loadTimeline();
 
@@ -53,16 +58,38 @@ function renderCueList(entries) {
     return;
   }
 
-  els.cueList.innerHTML = entries.map((entry, i) => `
-    <div class="cue-item">
-      <div class="cue-number">${i + 1}</div>
-      <div class="cue-source" style="background:${escapeAttr(entry.color || '#333')}">${escapeHtml(entry.source || '')}</div>
-      <div>
-        <div class="cue-title">${escapeHtml(entry.description || entry.rawName || '')}</div>
-        <div class="timeline-meta">${escapeHtml(entry.startTimecode)} - ${escapeHtml(entry.endTimecode)} · ${escapeHtml(entry.durationTimecode)} · ${escapeHtml(entry.number || '')}</div>
+  const transitionByTarget = new Map((timeline?.transitions || []).map(transition => [transition.toEntryId, transition]));
+
+  els.cueList.innerHTML = entries.map((entry, i) => {
+    const previous = entries[i - 1];
+    const transition = transitionByTarget.get(entry.id);
+    const durationSeconds = transition ? (transition.durationFrames / FPS).toFixed(2).replace(/\.?0+$/, '') : '1';
+    const boundary = previous ? `
+      <div class="transition-row" data-from-entry-id="${escapeAttr(previous.id)}" data-to-entry-id="${escapeAttr(entry.id)}">
+        <div class="transition-label">${escapeHtml(previous.source || '')} -> ${escapeHtml(entry.source || '')}</div>
+        <select class="transition-type">
+          <option value="cut"${transition ? '' : ' selected'}>Cut</option>
+          <option value="mix"${transition ? ' selected' : ''}>Mix</option>
+        </select>
+        <label class="transition-duration">
+          Duration
+          <input class="transition-duration-input" type="number" min="0.04" step="0.04" value="${escapeAttr(durationSeconds)}" />
+        </label>
       </div>
-    </div>
-  `).join('');
+    ` : '';
+
+    return `
+      ${boundary}
+      <div class="cue-item">
+        <div class="cue-number">${i + 1}</div>
+        <div class="cue-source" style="background:${escapeAttr(entry.color || '#333')}">${escapeHtml(entry.source || '')}</div>
+        <div>
+          <div class="cue-title">${escapeHtml(entry.description || entry.rawName || '')}</div>
+          <div class="timeline-meta">${escapeHtml(entry.startTimecode)} - ${escapeHtml(entry.endTimecode)} · ${escapeHtml(entry.durationTimecode)} · ${escapeHtml(entry.number || '')}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
 async function saveTimeline(event) {
@@ -107,9 +134,56 @@ async function removeTimeline() {
   }
 }
 
+async function saveTransitions() {
+  clearTimeout(transitionSaveTimer);
+  const transitions = [];
+
+  for (const row of els.cueList.querySelectorAll('.transition-row')) {
+    const type = row.querySelector('.transition-type')?.value || 'cut';
+    if (type !== 'mix') continue;
+
+    const durationSeconds = Number(row.querySelector('.transition-duration-input')?.value);
+    transitions.push({
+      type: 'mix',
+      fromEntryId: row.dataset.fromEntryId,
+      toEntryId: row.dataset.toEntryId,
+      durationFrames: Math.max(1, Math.round((Number.isFinite(durationSeconds) ? durationSeconds : 1) * FPS))
+    });
+  }
+
+  setTransitionStatus('Saving transitions...');
+  try {
+    const res = await fetch(`/api/shows/${encodeURIComponent(showId)}/timelines/${encodeURIComponent(timelineId)}/transitions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transitions })
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error || 'Transition save failed.');
+
+    timeline = payload.timeline;
+    renderTimeline(payload.show, payload.timeline);
+    setTransitionStatus(`Saved ${timeline.transitions.length} mix transitions.`);
+  } catch (err) {
+    setTransitionStatus(err.message, true);
+  }
+}
+
+function onTransitionEdit(event) {
+  if (!event.target.closest('.transition-row')) return;
+  setTransitionStatus('Saving transitions...');
+  clearTimeout(transitionSaveTimer);
+  transitionSaveTimer = setTimeout(saveTransitions, 350);
+}
+
 function setStatus(message, isError = false) {
   els.timelineStatus.textContent = message;
   els.timelineStatus.style.color = isError ? '#ff9a8c' : '#8ecbff';
+}
+
+function setTransitionStatus(message, isError = false) {
+  els.transitionStatus.textContent = message;
+  els.transitionStatus.style.color = isError ? '#ff9a8c' : '#8ecbff';
 }
 
 function escapeHtml(value) {
