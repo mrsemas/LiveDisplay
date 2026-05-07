@@ -45,17 +45,63 @@ const els = {
   zoomOut: document.getElementById('zoomOut'),
   zoomIn: document.getElementById('zoomIn'),
   zoomLabel: document.getElementById('zoomLabel'),
+  fullscreenButton: document.getElementById('fullscreenButton'),
   timelineName: document.getElementById('timelineName'),
   durationLabel: document.getElementById('durationLabel')
 };
 
 els.zoomOut.addEventListener('click', () => setZoom(zoomIndex - 1));
 els.zoomIn.addEventListener('click', () => setZoom(zoomIndex + 1));
+els.fullscreenButton.addEventListener('click', toggleFullscreen);
+document.addEventListener('fullscreenchange', updateFullscreenButton);
+document.addEventListener('webkitfullscreenchange', updateFullscreenButton);
 setZoom(zoomIndex);
+updateFullscreenButton();
 
 connectSocket();
 requestShow();
 requestAnimationFrame(tick);
+
+async function toggleFullscreen() {
+  if (!isFullscreenSupported()) return;
+
+  try {
+    if (getFullscreenElement()) {
+      await exitFullscreen();
+    } else {
+      await requestFullscreen(document.documentElement);
+    }
+  } catch {
+    updateFullscreenButton();
+  }
+}
+
+function updateFullscreenButton() {
+  const supported = isFullscreenSupported();
+  const isFullscreen = Boolean(getFullscreenElement());
+  els.fullscreenButton.disabled = !supported;
+  els.fullscreenButton.textContent = isFullscreen ? '⛶' : '⛶';
+  els.fullscreenButton.setAttribute('aria-label', isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen');
+  els.fullscreenButton.title = isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen';
+}
+
+function isFullscreenSupported() {
+  return Boolean(document.fullscreenEnabled || document.webkitFullscreenEnabled || document.documentElement.webkitRequestFullscreen);
+}
+
+function getFullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement;
+}
+
+function requestFullscreen(element) {
+  if (element.requestFullscreen) return element.requestFullscreen();
+  if (element.webkitRequestFullscreen) return element.webkitRequestFullscreen();
+}
+
+function exitFullscreen() {
+  if (document.exitFullscreen) return document.exitFullscreen();
+  if (document.webkitExitFullscreen) return document.webkitExitFullscreen();
+}
 
 function connectSocket() {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';

@@ -35,6 +35,7 @@ const els = {
   stopAudioButton: document.getElementById('stopAudioButton'),
   selectOutputButton: document.getElementById('selectOutputButton'),
   testToneButton: document.getElementById('testToneButton'),
+  fullscreenButton: document.getElementById('fullscreenButton'),
   outputSelect: document.getElementById('outputSelect'),
   levelSelect: document.getElementById('levelSelect')
 };
@@ -44,11 +45,56 @@ els.startAudioButton.addEventListener('click', startAudio);
 els.stopAudioButton.addEventListener('click', stopAudio);
 els.selectOutputButton.addEventListener('click', refreshAndSelectOutput);
 els.testToneButton.addEventListener('click', toggleTestTone);
+els.fullscreenButton.addEventListener('click', toggleFullscreen);
 els.outputSelect.addEventListener('change', () => selectOutputDevice(els.outputSelect.value));
 els.levelSelect.addEventListener('change', updateLevel);
+document.addEventListener('fullscreenchange', updateFullscreenButton);
+document.addEventListener('webkitfullscreenchange', updateFullscreenButton);
+updateFullscreenButton();
 
 connectSocket();
 requestAnimationFrame(renderLoop);
+
+async function toggleFullscreen() {
+  if (!isFullscreenSupported()) return;
+
+  try {
+    if (getFullscreenElement()) {
+      await exitFullscreen();
+    } else {
+      await requestFullscreen(document.documentElement);
+    }
+  } catch {
+    updateFullscreenButton();
+  }
+}
+
+function updateFullscreenButton() {
+  const supported = isFullscreenSupported();
+  const isFullscreen = Boolean(getFullscreenElement());
+  els.fullscreenButton.disabled = !supported;
+  els.fullscreenButton.textContent = isFullscreen ? '⛶' : '⛶';
+  els.fullscreenButton.setAttribute('aria-label', isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen');
+  els.fullscreenButton.title = isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen';
+}
+
+function isFullscreenSupported() {
+  return Boolean(document.fullscreenEnabled || document.webkitFullscreenEnabled || document.documentElement.webkitRequestFullscreen);
+}
+
+function getFullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement;
+}
+
+function requestFullscreen(element) {
+  if (element.requestFullscreen) return element.requestFullscreen();
+  if (element.webkitRequestFullscreen) return element.webkitRequestFullscreen();
+}
+
+function exitFullscreen() {
+  if (document.exitFullscreen) return document.exitFullscreen();
+  if (document.webkitExitFullscreen) return document.webkitExitFullscreen();
+}
 
 function connectSocket() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;

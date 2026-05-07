@@ -112,6 +112,27 @@ button, input, select { font: inherit; }
   font-variant-numeric: tabular-nums;
 }
 
+.fullscreen-button {
+  width: 34px;
+  height: 32px;
+  min-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid #2a2a2a;
+  background: #151515;
+  color: #eee;
+  font-size: 19px;
+  line-height: 1;
+}
+
+.fullscreen-button:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
 .camera-strip {
   display: flex;
   align-items: center;
@@ -688,6 +709,7 @@ button:active { transform: translateY(1px); }
   .main-clock { font-size: 19px; padding: 4px 6px; }
   .status-pill { min-width: 62px; font-size: 10px; padding: 5px 6px; }
   .latency { display: none; }
+  .fullscreen-button { width: 30px; height: 29px; font-size: 17px; }
   .camera-btn { min-width: 55px; padding: 7px 11px; font-size: 17px; }
   .row-index { font-size: 22px; }
   .source-cell { font-size: 25px; }
