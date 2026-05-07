@@ -377,6 +377,38 @@ function playbackPayload() {
   };
 }
 
+function cueForTimecode(entry) {
+  if (!entry) return null;
+  return {
+    id: entry.id,
+    source: entry.source,
+    name: entry.rawName || entry.description || entry.source || ''
+  };
+}
+
+function timecodePayload() {
+  const activeShow = getActiveShow();
+  const positionMs = currentPositionMs();
+  const positionFrames = msToFrames(positionMs, FPS);
+  const entries = flattenShow(activeShow);
+  const current = entries.find(entry => entry.startMs <= positionMs && (entry.renderEndMs || entry.endMs) > positionMs);
+  const next = entries.find(entry => entry.startMs > positionMs);
+
+  return {
+    type: 'timecode',
+    status: playback.status,
+    fps: FPS,
+    dropFrame: false,
+    baseTimecode: BASE_TIMECODE,
+    positionMs,
+    positionFrames,
+    timecode: framesToTimecode(BASE_FRAMES + positionFrames, FPS),
+    serverNow: Date.now(),
+    currentCue: cueForTimecode(current),
+    nextCue: cueForTimecode(next)
+  };
+}
+
 function broadcast(payload) {
   const json = JSON.stringify(payload);
   for (const client of wss.clients) {
@@ -390,6 +422,7 @@ function broadcastShow() {
 
 function broadcastState() {
   broadcast(playbackPayload());
+  broadcast(timecodePayload());
 }
 
 function resetCompanionAutomation(positionMs = null) {
@@ -535,6 +568,10 @@ app.get('/admin', (_req, res) => {
 
 app.get('/admin/timeline', (_req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'admin-timeline.html'));
+});
+
+app.get('/timecode', (_req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, 'timecode.html'));
 });
 
 app.get('/api/shows', (_req, res) => {
@@ -803,13 +840,14 @@ app.post('/api/control', (req, res) => {
   }
 
   const state = playbackPayload();
-  broadcast(state);
+  broadcastState();
   res.json({ ok: true, state });
 });
 
 wss.on('connection', (socket) => {
   socket.send(JSON.stringify({ type: 'show', ...showPayload() }));
   socket.send(JSON.stringify(playbackPayload()));
+  socket.send(JSON.stringify(timecodePayload()));
 
   socket.on('message', (raw) => {
     try {
