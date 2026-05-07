@@ -23,11 +23,11 @@ class LtcGeneratorProcessor extends AudioWorkletProcessor {
       }
 
       if (msg.type === 'sync') {
-        this.status = msg.status === 'playing' ? 'playing' : 'muted';
+        this.status = msg.status === 'playing' || msg.status === 'hold' ? msg.status : 'muted';
         const nextFrame = Math.max(0, Math.floor(Number(msg.frame) || 0));
         this.targetFrame = nextFrame;
 
-        if (Math.abs(this.targetFrame - this.currentFrame) > 2 || this.status !== 'playing') {
+        if (Math.abs(this.targetFrame - this.currentFrame) > 2 || this.status === 'hold') {
           this.currentFrame = this.targetFrame;
           this.sampleInFrame = 0;
           this.lastBitIndex = -1;
@@ -65,9 +65,13 @@ class LtcGeneratorProcessor extends AudioWorkletProcessor {
 
       if (this.sampleInFrame >= samplesPerFrame) {
         this.sampleInFrame -= samplesPerFrame;
-        const correction = this.targetFrame - this.currentFrame;
-        this.currentFrame += correction > 1 ? 2 : 1;
-        if (correction < -1) this.currentFrame -= 2;
+        if (this.status === 'playing') {
+          this.currentFrame++;
+          const correction = this.targetFrame - this.currentFrame;
+          if (Math.abs(correction) > 2) this.currentFrame = this.targetFrame;
+        } else {
+          this.currentFrame = this.targetFrame;
+        }
         this.bits = encodeLtcFrame(this.currentFrame, this.fps);
         this.lastBitIndex = -1;
         this.lastHalf = -1;

@@ -153,8 +153,6 @@ function renderLoop(now) {
   } else if (status === 'playing') {
     const elapsedFrames = Math.floor((staleMs / 1000) * fps);
     frames += elapsedFrames;
-  } else if (status === 'stopped') {
-    frames = 0;
   }
 
   renderedPositionFrames = Math.max(0, frames);
@@ -313,15 +311,14 @@ function updateLevel() {
 function syncLtc(status, disconnected, positionFrames, fps, baseTc) {
   if (!ltcNode || !ltcRunning || toneRunning) return;
 
-  const shouldMute = disconnected || status !== 'playing';
-  if (shouldMute) {
+  if (disconnected) {
     ltcNode.port.postMessage({ type: 'sync', status: 'muted', frame: BASE_FRAMES, fps });
     return;
   }
 
   ltcNode.port.postMessage({
     type: 'sync',
-    status,
+    status: status === 'playing' ? 'playing' : 'hold',
     frame: timecodeToFrames(baseTc, fps) + positionFrames,
     fps
   });
