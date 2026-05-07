@@ -1,14 +1,16 @@
 const FPS = 25;
 const BASE_TC = '01:00:00:00';
+const { TimecodeClient, framesToTimecode, timecodeToFrames } = window.LiveDisplayTimecode;
 const BASE_FRAMES = timecodeToFrames(BASE_TC, FPS);
 const DISCONNECT_MUTE_MS = 2000;
 
 let ws = null;
-let latestState = null;
+let timecodeClient = new TimecodeClient({ fps: FPS, baseTimecode: BASE_TC });
+let latestCueState = null;
 let lastReceiveClientNow = 0;
-let lastReceiveEpochNow = 0;
 let renderedPositionFrames = 0;
 let serverConnected = false;
+let clockPingTimer = null;
 let audioContext = null;
 let ltcNode = null;
 let ltcRunning = false;
@@ -23,7 +25,9 @@ const els = {
   serverPill: document.getElementById('serverPill'),
   audioPill: document.getElementById('audioPill'),
   fpsValue: document.getElementById('fpsValue'),
+  segmentValue: document.getElementById('segmentValue'),
   framesValue: document.getElementById('framesValue'),
+  rttValue: document.getElementById('rttValue'),
   driftValue: document.getElementById('driftValue'),
   audioOutputLabel: document.getElementById('audioOutputLabel'),
   levelLabel: document.getElementById('levelLabel'),
@@ -105,17 +109,24 @@ function connectSocket() {
 
   ws.addEventListener('open', () => {
     serverConnected = true;
+    timecodeClient.connected = true;
     els.headerStatus.textContent = 'Server connected';
+    sendClockPing();
+    clearInterval(clockPingTimer);
+    clockPingTimer = setInterval(sendClockPing, 2000);
   });
 
   ws.addEventListener('close', () => {
     serverConnected = false;
+    timecodeClient.freeze();
+    clearInterval(clockPingTimer);
     els.headerStatus.textContent = 'Server disconnected';
     setTimeout(connectSocket, 1000);
   });
 
   ws.addEventListener('error', () => {
     serverConnected = false;
+    timecodeClient.freeze();
   });
 
   ws.addEventListener('message', (event) => {
@@ -126,49 +137,73 @@ function connectSocket() {
       return;
     }
 
-    if (msg.type !== 'timecode') return;
+    if (msg.type === 'clock-pong') {
+      timecodeClient.handleClockPong(msg);
+      return;
+    }
 
-    latestState = msg;
-    lastReceiveClientNow = performance.now();
-    lastReceiveEpochNow = Date.now();
-    serverConnected = true;
+    if (msg.type === 'timecode-anchor') {
+      timecodeClient.handleAnchor(msg);
+      lastReceiveClientNow = performance.now();
+      serverConnected = true;
+      timecodeClient.connected = true;
+      return;
+    }
+
+    if (msg.type === 'timecode') {
+      latestCueState = msg;
+      lastReceiveClientNow = performance.now();
+      serverConnected = true;
+    }
   });
 }
 
+function sendClockPing() {
+  if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'clock-ping',
+      clientSendMs: performance.now()
+    }));
+  }
+}
+
 function renderLoop(now) {
-  const state = latestState;
+  const anchor = timecodeClient.anchor;
   const staleMs = lastReceiveClientNow ? now - lastReceiveClientNow : Number.POSITIVE_INFINITY;
   const disconnected = !serverConnected || staleMs > DISCONNECT_MUTE_MS;
-  const fps = Number(state?.fps) || FPS;
+  if (disconnected && timecodeClient.connected) timecodeClient.freeze();
 
-  let status = state?.status || 'waiting';
-  let frames = Number(state?.positionFrames) || 0;
+  const fps = Number(anchor?.fps) || FPS;
+  let status = anchor?.status || 'waiting';
+  let frames = timecodeClient.getCurrentFrame({ freezeDisconnected: disconnected });
 
-  if (!state) {
+  if (!anchor) {
     status = 'waiting';
     frames = 0;
   } else if (disconnected) {
     status = 'disconnected';
-    frames = renderedPositionFrames;
-  } else if (status === 'playing') {
-    const elapsedFrames = Math.floor((staleMs / 1000) * fps);
-    frames += elapsedFrames;
+    frames = timecodeClient.lastFrozenFrame;
   }
 
   renderedPositionFrames = Math.max(0, frames);
-  const baseTc = state?.baseTimecode || BASE_TC;
+  const baseTc = anchor?.baseTimecode || BASE_TC;
   const timecode = framesToTimecode(renderedPositionFrames, fps, baseTc);
-  const driftMs = state?.serverNow ? lastReceiveEpochNow - Number(state.serverNow) : null;
+  const serverCurrentFrame = Number(anchor?.currentFrame);
+  const driftFrames = Number.isFinite(serverCurrentFrame) ? renderedPositionFrames - serverCurrentFrame : null;
 
   els.timecodeMain.textContent = timecode;
   els.fpsValue.textContent = String(fps);
+  els.segmentValue.textContent = String(anchor?.segmentId ?? 0);
   els.framesValue.textContent = String(renderedPositionFrames);
-  els.driftValue.textContent = Number.isFinite(driftMs) ? `${driftMs >= 0 ? '+' : ''}${Math.round(driftMs)} ms` : '-- ms';
-  els.currentCue.textContent = cueLabel(state?.currentCue);
-  els.nextCue.textContent = cueLabel(state?.nextCue);
+  els.rttValue.textContent = Number.isFinite(timecodeClient.rttMs) ? `${Math.round(timecodeClient.rttMs)} ms` : '-- ms';
+  els.driftValue.textContent = Number.isFinite(driftFrames)
+    ? `${driftFrames >= 0 ? '+' : ''}${driftFrames} fr / ${Math.round(timecodeClient.serverOffsetMs)} ms`
+    : '--';
+  els.currentCue.textContent = cueLabel(latestCueState?.currentCue);
+  els.nextCue.textContent = cueLabel(latestCueState?.nextCue);
 
   updateStatus(status, disconnected);
-  syncLtc(status, disconnected, renderedPositionFrames, fps, baseTc);
+  syncLtc(anchor, status, disconnected, renderedPositionFrames, fps, baseTc);
 
   requestAnimationFrame(renderLoop);
 }
@@ -308,45 +343,24 @@ function updateLevel() {
   }
 }
 
-function syncLtc(status, disconnected, positionFrames, fps, baseTc) {
+function syncLtc(anchor, status, disconnected, positionFrames, fps, baseTc) {
   if (!ltcNode || !ltcRunning || toneRunning) return;
 
   if (disconnected) {
-    ltcNode.port.postMessage({ type: 'sync', status: 'muted', frame: BASE_FRAMES, fps });
+    ltcNode.port.postMessage({ type: 'sync', status: 'muted', targetFrame: BASE_FRAMES, fps });
     return;
   }
 
   ltcNode.port.postMessage({
     type: 'sync',
+    segmentId: anchor?.segmentId ?? 0,
     status: status === 'playing' ? 'playing' : 'hold',
-    frame: timecodeToFrames(baseTc, fps) + positionFrames,
-    fps
+    fps,
+    targetFrame: timecodeToFrames(baseTc, fps) + positionFrames,
+    targetServerTimeMs: anchor?.serverNowMs || 0,
+    serverOffsetMs: timecodeClient.serverOffsetMs,
+    playbackRate: anchor?.playbackRate ?? 0
   });
-}
-
-function framesToTimecode(positionFrames, fps, baseTc = BASE_TC) {
-  const baseFrames = timecodeToFrames(baseTc, fps);
-  const total = Math.max(0, baseFrames + Math.max(0, Math.floor(positionFrames)));
-  const frames = total % fps;
-  const totalSeconds = Math.floor(total / fps);
-  const seconds = totalSeconds % 60;
-  const totalMinutes = Math.floor(totalSeconds / 60);
-  const minutes = totalMinutes % 60;
-  const hours = Math.floor(totalMinutes / 60);
-
-  return [
-    String(hours).padStart(2, '0'),
-    String(minutes).padStart(2, '0'),
-    String(seconds).padStart(2, '0'),
-    String(frames).padStart(2, '0')
-  ].join(':');
-}
-
-function timecodeToFrames(tc, fps = FPS) {
-  const parts = String(tc || BASE_TC).split(':').map(Number);
-  if (parts.length !== 4 || parts.some(part => !Number.isFinite(part))) return 0;
-  const [hh, mm, ss, ff] = parts;
-  return (((hh * 60 + mm) * 60 + ss) * fps) + ff;
 }
 
 function cueLabel(cue) {

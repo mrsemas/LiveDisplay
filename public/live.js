@@ -1,6 +1,8 @@
 const FPS = 25;
 const BASE_TC = '01:00:00:00';
 const BASE_FRAMES = timecodeToFrames(BASE_TC);
+const { TimecodeClient, framesToMs: anchorFramesToMs } = window.LiveDisplayTimecode;
+const timecodeClient = new TimecodeClient({ fps: FPS, baseTimecode: BASE_TC });
 
 const zoomPresets = [
   { name: 'Compact', pxPerSecond: 72 },
@@ -33,6 +35,7 @@ let estimatedOneWayMs = 30;
 let lastPingAt = 0;
 let lastServerStateAt = 0;
 let serverTimecode = BASE_TC;
+let clockPingTimer = null;
 
 const els = {
   showName: document.getElementById('showName'),
@@ -109,11 +112,17 @@ function connectSocket() {
 
   ws.addEventListener('open', () => {
     wsConnected = true;
+    timecodeClient.connected = true;
     pingServer();
+    sendClockPing();
+    clearInterval(clockPingTimer);
+    clockPingTimer = setInterval(sendClockPing, 2000);
   });
 
   ws.addEventListener('close', () => {
     wsConnected = false;
+    timecodeClient.freeze();
+    clearInterval(clockPingTimer);
     setTimeout(connectSocket, 800);
   });
 
@@ -132,6 +141,17 @@ function connectSocket() {
 
     if (msg.type === 'state') {
       applyServerState(msg);
+    }
+
+    if (msg.type === 'timecode-anchor') {
+      timecodeClient.handleAnchor(msg);
+      serverStatus = msg.status || serverStatus;
+      serverTimecode = msg.currentTimecode || serverTimecode;
+      lastServerStateAt = performance.now();
+    }
+
+    if (msg.type === 'clock-pong') {
+      timecodeClient.handleClockPong(msg);
     }
 
     if (msg.type === 'syncPong') {
@@ -168,6 +188,15 @@ function pingServer() {
   setTimeout(pingServer, 1500);
 }
 
+function sendClockPing() {
+  if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'clock-ping',
+      clientSendMs: performance.now()
+    }));
+  }
+}
+
 function applyServerState(msg) {
   serverStatus = msg.status || 'stopped';
   serverTimecode = msg.currentTimecode || serverTimecode;
@@ -187,7 +216,13 @@ function tick(now) {
   const dt = Math.max(0, now - lastFrameAt);
   lastFrameAt = now;
 
-  if (serverStatus === 'playing') {
+  if (timecodeClient.anchor) {
+    const stale = now - timecodeClient.lastAnchorClientMs > 2000 || !wsConnected;
+    const frame = timecodeClient.getCurrentFrame({ freezeDisconnected: stale });
+    localPositionMs = anchorFramesToMs(frame, timecodeClient.anchor.fps || FPS);
+    serverStatus = stale ? serverStatus : timecodeClient.anchor.status;
+    serverTimecode = timecodeClient.getCurrentTimecode({ freezeDisconnected: stale });
+  } else if (serverStatus === 'playing') {
     localPositionMs += dt;
     const correction = targetPositionMs - localPositionMs;
     if (Math.abs(correction) > 500) localPositionMs = targetPositionMs;

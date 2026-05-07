@@ -197,8 +197,10 @@
       <div class="status-line">
         <div id="statusPill" class="pill stopped">Status: <strong>WAITING</strong></div>
         <div class="pill">FPS: <strong id="fpsValue">25</strong></div>
+        <div class="pill">Segment: <strong id="segmentValue">0</strong></div>
         <div class="pill">Frames: <strong id="framesValue">0</strong></div>
         <div id="serverPill" class="pill disconnected">Server: <strong>Disconnected</strong></div>
+        <div class="pill">RTT: <strong id="rttValue">-- ms</strong></div>
         <div class="pill">Drift: <strong id="driftValue">-- ms</strong></div>
         <div id="audioPill" class="pill">LTC: <strong>OFF</strong></div>
       </div>
@@ -237,6 +239,7 @@
     </footer>
   </main>
 
+  <script src="/timecode-client.js"></script>
   <script src="/timecode.js"></script>
 </body>
 </html>

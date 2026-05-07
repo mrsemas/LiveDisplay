@@ -9,6 +9,7 @@ class LtcGeneratorProcessor extends AudioWorkletProcessor {
     this.currentFrame = this.targetFrame;
     this.sampleInFrame = 0;
     this.phase = 1;
+    this.segmentId = -1;
     this.lastBitIndex = -1;
     this.lastHalf = -1;
     this.bits = encodeLtcFrame(this.currentFrame, this.fps);
@@ -24,14 +25,21 @@ class LtcGeneratorProcessor extends AudioWorkletProcessor {
 
       if (msg.type === 'sync') {
         this.status = msg.status === 'playing' || msg.status === 'hold' ? msg.status : 'muted';
-        const nextFrame = Math.max(0, Math.floor(Number(msg.frame) || 0));
+        const nextFrame = Math.max(0, Math.floor(Number(msg.targetFrame ?? msg.frame) || 0));
+        const nextSegmentId = Number(msg.segmentId);
+        const segmentChanged = Number.isFinite(nextSegmentId) && nextSegmentId !== this.segmentId;
+        if (Number.isFinite(nextSegmentId)) this.segmentId = nextSegmentId;
         this.targetFrame = nextFrame;
 
-        if (Math.abs(this.targetFrame - this.currentFrame) > 2 || this.status === 'hold') {
+        const drift = this.targetFrame - this.currentFrame;
+        if (segmentChanged || Math.abs(drift) > 5 || this.status === 'hold') {
           this.currentFrame = this.targetFrame;
           this.sampleInFrame = 0;
           this.lastBitIndex = -1;
           this.lastHalf = -1;
+          this.bits = encodeLtcFrame(this.currentFrame, this.fps);
+        } else if (Math.abs(drift) >= 2) {
+          this.currentFrame += Math.sign(drift);
           this.bits = encodeLtcFrame(this.currentFrame, this.fps);
         }
       }

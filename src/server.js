@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import * as timecodeEngine from './timecode-engine.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -39,11 +40,6 @@ app.use(express.static(PUBLIC_DIR));
 let store = loadStore();
 let abbreviations = loadAbbreviations();
 let companion = loadCompanion();
-let playback = {
-  status: 'stopped', // stopped | playing | paused
-  positionMs: 0,
-  startedAtMs: 0
-};
 let companionRuntime = {
   lastPositionMs: null,
   pendingEvents: [],
@@ -51,6 +47,7 @@ let companionRuntime = {
   mixBlockUntilMs: 0,
   processing: false
 };
+syncTimecodeContext();
 
 function newId(prefix = 'id') {
   return `${prefix}_${crypto.randomBytes(5).toString('hex')}`;
@@ -243,10 +240,31 @@ function timelinePayload(timeline) {
 
 function afterShowTimelineChange(show) {
   if (store.activeShowId !== show.id) return;
-  setPlaybackPosition(currentPositionMs());
+  const positionMs = currentPositionMs();
+  syncTimecodeContext();
+  setPlaybackPosition(positionMs);
   resetCompanionAutomation();
   broadcastShow();
-  broadcastState();
+  broadcastState({ anchor: true });
+}
+
+function syncTimecodeContext() {
+  const activeShow = getActiveShow();
+  const currentFrame = timecodeEngine.getCurrentFrame();
+  timecodeEngine.setTimelineContext({
+    showId: activeShow?.id || null,
+    timelineId: timelineIdForFrame(activeShow, currentFrame),
+    durationFrames: getShowDurationFrames(activeShow)
+  });
+}
+
+function timelineIdForFrame(show, frame) {
+  if (!show?.timelines?.length) return null;
+  return show.timelines.find(timeline => {
+    const start = timeline.offsetFrames || 0;
+    const end = start + (timeline.durationFrames || 0);
+    return frame >= start && frame < end;
+  })?.id || show.timelines.at(-1)?.id || null;
 }
 
 function getShowDurationFrames(show) {
@@ -262,27 +280,14 @@ function getShowDurationMs(show) {
 function currentPositionMs() {
   const activeShow = getActiveShow();
   const durationMs = getShowDurationMs(activeShow);
-
-  if (playback.status === 'playing') {
-    const elapsed = Date.now() - playback.startedAtMs;
-    const pos = playback.positionMs + elapsed;
-    if (durationMs > 0 && pos >= durationMs) {
-      playback.status = 'stopped';
-      playback.positionMs = durationMs;
-      playback.startedAtMs = 0;
-      return durationMs;
-    }
-    return Math.max(0, durationMs ? Math.min(pos, durationMs) : pos);
-  }
-
-  return Math.max(0, durationMs ? Math.min(playback.positionMs, durationMs) : playback.positionMs);
+  const positionMs = framesToMs(timecodeEngine.getCurrentFrame(), FPS);
+  return Math.max(0, durationMs ? Math.min(positionMs, durationMs) : positionMs);
 }
 
 function setPlaybackPosition(ms) {
   const durationMs = getShowDurationMs(getActiveShow());
   const clamped = Math.max(0, durationMs ? Math.min(ms, durationMs) : ms);
-  playback.positionMs = clamped;
-  if (playback.status === 'playing') playback.startedAtMs = Date.now();
+  timecodeEngine.seek(msToFrames(clamped, FPS));
 }
 
 function flattenShow(show) {
@@ -364,16 +369,18 @@ function playbackPayload() {
   const positionMs = currentPositionMs();
   const positionFrames = msToFrames(positionMs, FPS);
   const durationMs = getShowDurationMs(activeShow);
+  const anchor = timecodeEngine.getAnchorPayload();
 
   return {
     type: 'state',
-    status: playback.status,
+    status: anchor.status,
     positionMs,
     positionFrames,
-    serverSentAt: Date.now(),
+    serverSentAt: anchor.serverNowMs,
     durationMs,
     durationFrames: getShowDurationFrames(activeShow),
-    currentTimecode: framesToTimecode(BASE_FRAMES + positionFrames, FPS)
+    currentTimecode: anchor.currentTimecode,
+    segmentId: anchor.segmentId
   };
 }
 
@@ -393,17 +400,19 @@ function timecodePayload() {
   const entries = flattenShow(activeShow);
   const current = entries.find(entry => entry.startMs <= positionMs && (entry.renderEndMs || entry.endMs) > positionMs);
   const next = entries.find(entry => entry.startMs > positionMs);
+  const anchor = timecodeEngine.getAnchorPayload();
 
   return {
     type: 'timecode',
-    status: playback.status,
-    fps: FPS,
-    dropFrame: false,
-    baseTimecode: BASE_TIMECODE,
+    status: anchor.status,
+    fps: anchor.fps,
+    dropFrame: anchor.dropFrame,
+    baseTimecode: anchor.baseTimecode,
     positionMs,
     positionFrames,
-    timecode: framesToTimecode(BASE_FRAMES + positionFrames, FPS),
-    serverNow: Date.now(),
+    timecode: anchor.currentTimecode,
+    serverNow: anchor.serverNowMs,
+    segmentId: anchor.segmentId,
     currentCue: cueForTimecode(current),
     nextCue: cueForTimecode(next)
   };
@@ -420,9 +429,10 @@ function broadcastShow() {
   broadcast({ type: 'show', ...showPayload() });
 }
 
-function broadcastState() {
+function broadcastState({ anchor = false } = {}) {
   broadcast(playbackPayload());
   broadcast(timecodePayload());
+  if (anchor) broadcast(timecodeEngine.getAnchorPayload());
 }
 
 function resetCompanionAutomation(positionMs = null) {
@@ -434,7 +444,7 @@ function resetCompanionAutomation(positionMs = null) {
 }
 
 function processCompanionAutomation() {
-  if (playback.status !== 'playing') {
+  if (timecodeEngine.getState().status !== 'playing') {
     companionRuntime.lastPositionMs = currentPositionMs();
     return;
   }
@@ -605,11 +615,11 @@ app.post('/api/shows', (req, res) => {
   store.shows.push(show);
   store.activeShowId = show.id;
   saveStore();
-  setPlaybackPosition(0);
-  playback.status = 'stopped';
+  syncTimecodeContext();
+  timecodeEngine.stop();
   resetCompanionAutomation(0);
   broadcastShow();
-  broadcastState();
+  broadcastState({ anchor: true });
   res.json({ ok: true, show });
 });
 
@@ -620,12 +630,11 @@ app.post('/api/active-show', (req, res) => {
 
   store.activeShowId = show.id;
   saveStore();
-  playback.status = 'stopped';
-  playback.positionMs = 0;
-  playback.startedAtMs = 0;
+  syncTimecodeContext();
+  timecodeEngine.stop();
   resetCompanionAutomation(0);
   broadcastShow();
-  broadcastState();
+  broadcastState({ anchor: true });
   res.json({ ok: true, activeShowId: show.id });
 });
 
@@ -645,6 +654,10 @@ app.get('/api/shows/:showId/timelines/:timelineId', (req, res) => {
 
 app.get('/api/state', (_req, res) => {
   res.json(playbackPayload());
+});
+
+app.get('/api/timecode', (_req, res) => {
+  res.json(timecodeEngine.getAnchorPayload());
 });
 
 app.get('/api/abbreviations', (_req, res) => {
@@ -702,12 +715,11 @@ app.post('/api/import', upload.single('csv'), (req, res) => {
     recomputeTimelineOffsets(show);
     saveStore();
     store.activeShowId = show.id;
-    playback.status = 'stopped';
-    playback.positionMs = 0;
-    playback.startedAtMs = 0;
+    syncTimecodeContext();
+    timecodeEngine.stop();
     resetCompanionAutomation(0);
     broadcastShow();
-    broadcastState();
+    broadcastState({ anchor: true });
 
     res.json({ ok: true, show: showPayload(show).show });
   } catch (err) {
@@ -806,48 +818,70 @@ app.delete('/api/shows/:showId/timelines/:timelineId', (req, res) => {
   res.json({ ok: true, removedTimelineId: removed.id, show: showPayload(show).show });
 });
 
-app.post('/api/control', (req, res) => {
-  const action = String(req.body?.action || '');
+function handleControlAction(action, body = {}) {
   const activeShow = getActiveShow();
-  const durationMs = getShowDurationMs(activeShow);
+  const durationFrames = getShowDurationFrames(activeShow);
 
   if (action === 'start') {
-    const current = currentPositionMs();
-    playback.positionMs = durationMs && current >= durationMs ? 0 : current;
-    playback.startedAtMs = Date.now();
-    playback.status = 'playing';
-    resetCompanionAutomation(playback.positionMs);
+    const currentFrame = timecodeEngine.getCurrentFrame();
+    if (durationFrames && currentFrame >= durationFrames) timecodeEngine.seek(0);
+    timecodeEngine.play();
+    resetCompanionAutomation(currentPositionMs());
   } else if (action === 'pause') {
-    playback.positionMs = currentPositionMs();
-    playback.startedAtMs = 0;
-    playback.status = 'paused';
-    resetCompanionAutomation(playback.positionMs);
+    timecodeEngine.pause();
+    resetCompanionAutomation(currentPositionMs());
   } else if (action === 'stop') {
-    playback.positionMs = 0;
-    playback.startedAtMs = 0;
-    playback.status = 'stopped';
+    timecodeEngine.stop();
     resetCompanionAutomation(0);
   } else if (action === 'reset') {
-    setPlaybackPosition(0);
+    timecodeEngine.reset();
     resetCompanionAutomation(0);
   } else if (action === 'seek') {
-    const positionMs = Number(req.body?.positionMs);
-    if (!Number.isFinite(positionMs)) return res.status(400).json({ error: 'positionMs must be a number.' });
-    setPlaybackPosition(positionMs);
-    resetCompanionAutomation(playback.positionMs);
+    const positionMs = Number(body?.positionMs);
+    if (!Number.isFinite(positionMs)) {
+      const error = new Error('positionMs must be a number.');
+      error.statusCode = 400;
+      throw error;
+    }
+    timecodeEngine.seek(msToFrames(positionMs, FPS));
+    resetCompanionAutomation(currentPositionMs());
   } else {
-    return res.status(400).json({ error: 'Unknown control action.' });
+    const error = new Error('Unknown control action.');
+    error.statusCode = 400;
+    throw error;
   }
 
+  syncTimecodeContext();
   const state = playbackPayload();
-  broadcastState();
-  res.json({ ok: true, state });
+  broadcastState({ anchor: true });
+  return state;
+}
+
+function controlResponse(action, req, res) {
+  try {
+    const state = handleControlAction(action, req.body);
+    res.json({ ok: true, state });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message || 'Control action failed.' });
+  }
+}
+
+app.post('/api/control', (req, res) => {
+  controlResponse(String(req.body?.action || ''), req, res);
 });
+
+app.post('/api/play', (req, res) => controlResponse('start', req, res));
+app.post('/api/pause', (req, res) => controlResponse('pause', req, res));
+app.post('/api/stop', (req, res) => controlResponse('stop', req, res));
+app.post('/api/reset', (req, res) => controlResponse('reset', req, res));
+app.post('/api/seek', (req, res) => controlResponse('seek', req, res));
+app.post('/api/scrub', (req, res) => controlResponse('seek', req, res));
 
 wss.on('connection', (socket) => {
   socket.send(JSON.stringify({ type: 'show', ...showPayload() }));
   socket.send(JSON.stringify(playbackPayload()));
   socket.send(JSON.stringify(timecodePayload()));
+  socket.send(JSON.stringify(timecodeEngine.getAnchorPayload()));
 
   socket.on('message', (raw) => {
     try {
@@ -860,6 +894,15 @@ wss.on('connection', (socket) => {
           serverSentAt: Date.now()
         }));
       }
+      if (msg.type === 'clock-ping') {
+        const serverReceiveMs = Date.now();
+        socket.send(JSON.stringify({
+          type: 'clock-pong',
+          clientSendMs: msg.clientSendMs,
+          serverReceiveMs,
+          serverSendMs: Date.now()
+        }));
+      }
     } catch {
       // Ignore malformed client messages.
     }
@@ -870,6 +913,11 @@ setInterval(() => {
   processCompanionAutomation();
   broadcastState();
 }, 100);
+
+setInterval(() => {
+  syncTimecodeContext();
+  broadcast(timecodeEngine.getAnchorPayload());
+}, 1000);
 
 const PORT = Number(process.env.PORT || 3000);
 server.listen(PORT, '0.0.0.0', () => {
