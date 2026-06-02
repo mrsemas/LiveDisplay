@@ -1,3 +1,5 @@
+import { MtcOutput } from './mtc-output.js';
+
 const FPS = 25;
 const BASE_TC = '01:00:00:00';
 const { TimecodeClient, framesToTimecode, timecodeToFrames } = window.LiveDisplayTimecode;
@@ -16,6 +18,18 @@ let ltcNode = null;
 let ltcRunning = false;
 let toneRunning = false;
 let selectedOutputLabel = 'Default';
+let midiAccess = null;
+let selectedMidiOutput = null;
+let midiDevices = [];
+let midiStatus = 'OFF';
+let midiRequested = false;
+
+const mtcOutput = new MtcOutput({
+  fps: FPS,
+  baseTimecode: BASE_TC,
+  getCurrentFrame: () => timecodeClient.getCurrentFrame({ freezeDisconnected: isTimecodeDisconnected() }),
+  getStatus: () => getMidiPlaybackStatus()
+});
 
 const els = {
   timecodeMain: document.getElementById('timecodeMain'),
@@ -41,7 +55,22 @@ const els = {
   testToneButton: document.getElementById('testToneButton'),
   fullscreenButton: document.getElementById('fullscreenButton'),
   outputSelect: document.getElementById('outputSelect'),
-  levelSelect: document.getElementById('levelSelect')
+  levelSelect: document.getElementById('levelSelect'),
+  enableMidiButton: document.getElementById('enableMidiButton'),
+  disableMidiButton: document.getElementById('disableMidiButton'),
+  refreshMidiButton: document.getElementById('refreshMidiButton'),
+  midiOutputSelect: document.getElementById('midiOutputSelect'),
+  midiFpsValue: document.getElementById('midiFpsValue'),
+  midiStatusValue: document.getElementById('midiStatusValue'),
+  midiLastSentValue: document.getElementById('midiLastSentValue'),
+  midiDeviceValue: document.getElementById('midiDeviceValue'),
+  midiRateValue: document.getElementById('midiRateValue'),
+  midiTimestampValue: document.getElementById('midiTimestampValue'),
+  midiSegmentValue: document.getElementById('midiSegmentValue'),
+  midiFrameValue: document.getElementById('midiFrameValue'),
+  midiRttValue: document.getElementById('midiRttValue'),
+  midiSuppressedValue: document.getElementById('midiSuppressedValue'),
+  midiError: document.getElementById('midiError')
 };
 
 els.connectButton.addEventListener('click', connectSocket);
@@ -52,9 +81,14 @@ els.testToneButton.addEventListener('click', toggleTestTone);
 els.fullscreenButton.addEventListener('click', toggleFullscreen);
 els.outputSelect.addEventListener('change', () => selectOutputDevice(els.outputSelect.value));
 els.levelSelect.addEventListener('change', updateLevel);
+els.enableMidiButton.addEventListener('click', enableMidi);
+els.disableMidiButton.addEventListener('click', disableMidi);
+els.refreshMidiButton.addEventListener('click', refreshMidiOutputs);
+els.midiOutputSelect.addEventListener('change', () => selectMidiOutput(els.midiOutputSelect.value));
 document.addEventListener('fullscreenchange', updateFullscreenButton);
 document.addEventListener('webkitfullscreenchange', updateFullscreenButton);
 updateFullscreenButton();
+initializeMidiUi();
 
 connectSocket();
 requestAnimationFrame(renderLoop);
@@ -144,6 +178,8 @@ function connectSocket() {
 
     if (msg.type === 'timecode-anchor') {
       timecodeClient.handleAnchor(msg);
+      mtcOutput.baseTimecode = msg.baseTimecode || BASE_TC;
+      mtcOutput.handleSegmentChange(msg.segmentId);
       lastReceiveClientNow = performance.now();
       serverConnected = true;
       timecodeClient.connected = true;
@@ -204,6 +240,7 @@ function renderLoop(now) {
 
   updateStatus(status, disconnected);
   syncLtc(anchor, status, disconnected, renderedPositionFrames, fps, baseTc);
+  updateMidiStatus(status, disconnected);
 
   requestAnimationFrame(renderLoop);
 }
@@ -361,6 +398,213 @@ function syncLtc(anchor, status, disconnected, positionFrames, fps, baseTc) {
     serverOffsetMs: timecodeClient.serverOffsetMs,
     playbackRate: anchor?.playbackRate ?? 0
   });
+}
+
+async function enableMidi() {
+  try {
+    clearMidiError();
+    midiRequested = true;
+
+    if (!navigator.requestMIDIAccess) {
+      throw new Error('Web MIDI is not supported in this browser. Use Chrome or Edge.');
+    }
+
+    if (!midiAccess) {
+      midiAccess = await navigator.requestMIDIAccess({ sysex: false });
+      midiAccess.onstatechange = () => {
+        refreshMidiOutputs();
+      };
+    }
+
+    refreshMidiOutputs();
+
+    if (!selectedMidiOutput && midiDevices.length === 1) {
+      selectMidiOutput(midiDevices[0].id);
+    }
+
+    if (!selectedMidiOutput) {
+      midiStatus = 'NO DEVICE';
+      throw new Error('No MIDI output selected.');
+    }
+
+    mtcOutput.setOutput(selectedMidiOutput);
+    mtcOutput.start();
+    midiStatus = 'RUNNING';
+    els.enableMidiButton.disabled = true;
+    els.disableMidiButton.disabled = false;
+  } catch (err) {
+    const message = err.message || 'MIDI could not be enabled.';
+    midiStatus = message === 'No MIDI output selected.' ? 'NO DEVICE' : 'ERROR';
+    showMidiError(err.message || 'MIDI could not be enabled.');
+  }
+
+  updateMidiStatus();
+}
+
+function disableMidi() {
+  mtcOutput.stop();
+  mtcOutput.lastError = '';
+  midiRequested = false;
+  midiStatus = 'OFF';
+  els.enableMidiButton.disabled = false;
+  els.disableMidiButton.disabled = true;
+  clearMidiError();
+  updateMidiStatus();
+}
+
+function getMidiOutputs() {
+  if (!midiAccess) return [];
+
+  return Array.from(midiAccess.outputs.values()).map(output => ({
+    id: output.id,
+    name: output.name,
+    manufacturer: output.manufacturer,
+    state: output.state,
+    connection: output.connection,
+    output
+  }));
+}
+
+function refreshMidiOutputs() {
+  if (!navigator.requestMIDIAccess) {
+    midiStatus = 'ERROR';
+    showMidiError('Web MIDI is not supported in this browser. Use Chrome or Edge.');
+    updateMidiStatus();
+    return;
+  }
+
+  if (!midiAccess) {
+    showMidiError('Enable MIDI before refreshing devices.');
+    updateMidiStatus();
+    return;
+  }
+
+  clearMidiError();
+  midiDevices = getMidiOutputs();
+
+  const previousSelection = els.midiOutputSelect.value || selectedMidiOutput?.id || '';
+  els.midiOutputSelect.innerHTML = '<option value="">MIDI Output Device: None</option>';
+
+  for (const device of midiDevices) {
+    const option = document.createElement('option');
+    option.value = device.id;
+    option.textContent = `MIDI Output Device: ${formatMidiDeviceName(device)}`;
+    els.midiOutputSelect.appendChild(option);
+  }
+
+  els.midiOutputSelect.disabled = !midiAccess || midiDevices.length === 0;
+
+  if (previousSelection && midiAccess?.outputs.has(previousSelection)) {
+    els.midiOutputSelect.value = previousSelection;
+    selectMidiOutput(previousSelection, { silent: true });
+  } else if (selectedMidiOutput) {
+    selectedMidiOutput = null;
+    mtcOutput.setOutput(null);
+    midiStatus = mtcOutput.enabled ? 'NO DEVICE' : 'OFF';
+    showMidiError('Selected MIDI output disconnected.');
+  } else if (midiAccess && midiDevices.length === 0) {
+    midiStatus = mtcOutput.enabled ? 'NO DEVICE' : midiStatus;
+    showMidiError('No MIDI output devices found.');
+  }
+
+  updateMidiStatus();
+}
+
+function selectMidiOutput(outputId, { silent = false } = {}) {
+  try {
+    if (!midiAccess) {
+      throw new Error('MIDI access not enabled.');
+    }
+
+    selectedMidiOutput = outputId ? midiAccess.outputs.get(outputId) : null;
+    if (outputId && !selectedMidiOutput) {
+      throw new Error('Selected MIDI output not found.');
+    }
+
+    mtcOutput.setOutput(selectedMidiOutput);
+    if (selectedMidiOutput && mtcOutput.enabled) {
+      mtcOutput.start();
+      midiStatus = 'RUNNING';
+    } else if (!selectedMidiOutput && mtcOutput.enabled) {
+      midiStatus = 'NO DEVICE';
+    }
+
+    if (!silent) clearMidiError();
+  } catch (err) {
+    midiStatus = 'ERROR';
+    if (!silent) showMidiError(err.message || 'Could not select MIDI output.');
+  }
+
+  updateMidiStatus();
+}
+
+function updateMidiStatus(renderStatus, disconnected) {
+  const playbackStatus = renderStatus || getMidiPlaybackStatus();
+  const deviceConnected = selectedMidiOutput && selectedMidiOutput.state !== 'disconnected';
+
+  if (mtcOutput.lastError) {
+    midiStatus = 'ERROR';
+    showMidiError(mtcOutput.lastError);
+  } else if (midiStatus === 'ERROR' && !mtcOutput.enabled) {
+    midiStatus = 'ERROR';
+  } else if (midiRequested && !deviceConnected) {
+    midiStatus = 'NO DEVICE';
+  } else if (!mtcOutput.enabled) {
+    midiStatus = 'OFF';
+  } else if (disconnected || playbackStatus === 'disconnected') {
+    midiStatus = 'PAUSED';
+  } else if (playbackStatus === 'playing') {
+    midiStatus = 'RUNNING';
+  } else {
+    midiStatus = 'PAUSED';
+  }
+
+  els.midiStatusValue.textContent = midiStatus;
+  els.midiLastSentValue.textContent = mtcOutput.lastSentTimecode || '--';
+  els.midiDeviceValue.textContent = selectedMidiOutput?.name || selectedMidiOutput?.manufacturer || 'None';
+  els.midiRateValue.textContent = `${FPS * 8}/s`;
+  els.midiTimestampValue.textContent = Number.isFinite(mtcOutput.lastSendTimestamp)
+    ? `${Math.round(mtcOutput.lastSendTimestamp)} ms`
+    : '--';
+  els.midiSegmentValue.textContent = String(timecodeClient.anchor?.segmentId ?? 0);
+  els.midiFrameValue.textContent = String(renderedPositionFrames);
+  els.midiRttValue.textContent = Number.isFinite(timecodeClient.rttMs) ? `${Math.round(timecodeClient.rttMs)} ms` : '-- ms';
+  els.midiSuppressedValue.textContent = String(mtcOutput.suppressedMessages);
+  els.midiFpsValue.textContent = '25 fps fixed';
+}
+
+function initializeMidiUi() {
+  if (!navigator.requestMIDIAccess) {
+    els.enableMidiButton.disabled = true;
+    els.refreshMidiButton.disabled = true;
+    els.midiOutputSelect.disabled = true;
+    midiStatus = 'ERROR';
+    showMidiError('Web MIDI is not supported in this browser. Use Chrome or Edge.');
+    updateMidiStatus();
+  }
+}
+
+function getMidiPlaybackStatus() {
+  if (!timecodeClient.anchor) return 'waiting';
+  if (isTimecodeDisconnected()) return 'disconnected';
+  return timecodeClient.anchor.status || 'stopped';
+}
+
+function isTimecodeDisconnected() {
+  const staleMs = lastReceiveClientNow ? performance.now() - lastReceiveClientNow : Number.POSITIVE_INFINITY;
+  return !serverConnected || staleMs > DISCONNECT_MUTE_MS;
+}
+
+function formatMidiDeviceName(device) {
+  return device.name || [device.manufacturer, device.id].filter(Boolean).join(' ') || 'MIDI Output';
+}
+
+function showMidiError(message) {
+  els.midiError.textContent = message;
+}
+
+function clearMidiError() {
+  els.midiError.textContent = '';
 }
 
 function cueLabel(cue) {

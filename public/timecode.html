@@ -139,6 +139,43 @@
       gap: 10px;
     }
 
+    .output-panel {
+      width: min(1100px, 100%);
+      display: grid;
+      gap: 12px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, .035);
+    }
+
+    .output-panel h2 {
+      margin: 0;
+      color: var(--text);
+      font-size: 14px;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+
+    .midi-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .midi-details {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px 16px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .midi-details span {
+      color: var(--text);
+      font-weight: 750;
+    }
+
     button,
     select {
       min-height: 44px;
@@ -168,6 +205,7 @@
     }
 
     .wide { grid-column: span 2; }
+    .full { grid-column: 1 / -1; }
     .error { color: var(--amber); letter-spacing: 0; text-transform: none; font-weight: 650; }
 
     @media (max-width: 760px) {
@@ -176,7 +214,9 @@
       .header-actions { width: 100%; justify-content: space-between; }
       .details { grid-template-columns: 1fr; font-size: 14px; }
       .controls { grid-template-columns: 1fr 1fr; }
+      .midi-grid, .midi-details { grid-template-columns: 1fr; }
       .wide { grid-column: span 2; }
+      .full { grid-column: 1 / -1; }
       .timecode-main { font-size: clamp(52px, 15vw, 110px); }
     }
   </style>
@@ -231,6 +271,31 @@
           <option>FPS: 25 fixed</option>
         </select>
       </div>
+
+      <section class="output-panel" aria-label="MIDI Timecode Output">
+        <h2>MIDI Timecode Output</h2>
+        <div class="midi-grid">
+          <button id="enableMidiButton" type="button">Enable MIDI</button>
+          <button id="disableMidiButton" type="button" disabled>Disable MIDI</button>
+          <button id="refreshMidiButton" type="button">Refresh MIDI Devices</button>
+          <select id="midiOutputSelect" class="full" aria-label="MIDI output device" disabled>
+            <option value="">MIDI Output Device: None</option>
+          </select>
+        </div>
+        <div class="midi-details">
+          <div>MTC FPS: <span id="midiFpsValue">25 fps fixed</span></div>
+          <div>MIDI Status: <span id="midiStatusValue">OFF</span></div>
+          <div>Last Sent: <span id="midiLastSentValue">--</span></div>
+          <div>MIDI Device: <span id="midiDeviceValue">None</span></div>
+          <div>Quarter-frame Rate: <span id="midiRateValue">200/s</span></div>
+          <div>Last Send Timestamp: <span id="midiTimestampValue">--</span></div>
+          <div>Current Segment: <span id="midiSegmentValue">0</span></div>
+          <div>Current Frame: <span id="midiFrameValue">0</span></div>
+          <div>Estimated RTT: <span id="midiRttValue">-- ms</span></div>
+          <div>Suppressed Messages: <span id="midiSuppressedValue">0</span></div>
+        </div>
+        <div id="midiError" class="error"></div>
+      </section>
     </section>
 
     <footer>
@@ -240,6 +305,6 @@
   </main>
 
   <script src="/timecode-client.js"></script>
-  <script src="/timecode.js"></script>
+  <script type="module" src="/timecode.js"></script>
 </body>
 </html>
