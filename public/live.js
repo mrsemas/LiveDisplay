@@ -132,9 +132,9 @@ function connectSocket() {
 
     if (msg.type === 'show') {
       showData = msg;
-      if (!showData.cameras.includes(selectedCamera)) {
-        selectedCamera = showData.cameras[0] || '';
-        localStorage.setItem('selectedCamera', selectedCamera);
+      if (selectedCamera && !showData.cameras.includes(selectedCamera)) {
+        selectedCamera = '';
+        localStorage.removeItem('selectedCamera');
       }
       renderStatic();
     }
@@ -170,9 +170,9 @@ async function requestShow() {
   try {
     const res = await fetch('/api/show');
     showData = await res.json();
-    if (!showData.cameras.includes(selectedCamera)) {
-      selectedCamera = showData.cameras[0] || '';
-      localStorage.setItem('selectedCamera', selectedCamera);
+    if (selectedCamera && !showData.cameras.includes(selectedCamera)) {
+      selectedCamera = '';
+      localStorage.removeItem('selectedCamera');
     }
     renderStatic();
   } catch {
@@ -267,8 +267,9 @@ function renderCameraButtons() {
     const color = findColorForSource(camera) || '#333';
     btn.style.background = color;
     btn.addEventListener('click', () => {
-      selectedCamera = camera;
-      localStorage.setItem('selectedCamera', selectedCamera);
+      selectedCamera = selectedCamera === camera ? '' : camera;
+      if (selectedCamera) localStorage.setItem('selectedCamera', selectedCamera);
+      else localStorage.removeItem('selectedCamera');
       renderCameraButtons();
       renderLive(true);
     });
@@ -304,7 +305,7 @@ function updateTopClock() {
 
 function renderPinnedRow() {
   if (!selectedCamera) {
-    els.pinnedRow.innerHTML = emptyPinnedHtml('PIN', 'Pick a camera');
+    renderGeneralPinnedRow();
     return;
   }
 
@@ -350,6 +351,38 @@ function renderPinnedRow() {
   `;
 }
 
+function renderGeneralPinnedRow() {
+  const entries = (showData.entries || []).filter(entry => entry.isCamera);
+  const active = entries.find(e => isEntryOnAir(e, localPositionMs));
+  const next = entries.find(e => e.startMs > localPositionMs);
+  const ref = active || next;
+
+  if (!ref) {
+    els.pinnedRow.className = 'timeline-row pinned empty-row';
+    els.pinnedRow.innerHTML = emptyPinnedHtml('ALL', 'No more camera shots');
+    return;
+  }
+
+  const isLive = Boolean(active);
+  const countdown = isLive
+    ? formatCountdown((ref.renderEndMs || ref.endMs) - localPositionMs)
+    : formatCountdown(ref.startMs - localPositionMs);
+  const countClass = isLive ? 'live' : 'future';
+  const visibleEntries = entries.filter(entry => (entry.renderEndMs || entry.endMs) > localPositionMs - 80);
+
+  els.pinnedRow.className = `timeline-row pinned general ${isLive ? 'current' : 'future'}`;
+  els.pinnedRow.innerHTML = `
+    <div class="row-index">ALL</div>
+    <div class="source-cell all-source">ALL</div>
+    <div class="count-cell ${countClass}">${escapeHtml(countdown)}</div>
+    <div class="track-area">
+      <div class="playhead"></div>
+      ${generalCueGeometryHtml(visibleEntries, localPositionMs)}
+      <div class="row-description">${formatDescription(ref, false, isLive)}</div>
+    </div>
+  `;
+}
+
 function renderWaterfallRows(force = false) {
   const entries = showData.entries || [];
   const rowHeight = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--row-h')) || 49;
@@ -361,14 +394,14 @@ function renderWaterfallRows(force = false) {
 
   const html = visible.map((entry, i) => {
     const isLive = isEntryOnAir(entry, localPositionMs);
-    return rowHtml(entry, i + 1, localPositionMs, false, isLive, entry.source);
+    return rowHtml(entry, i + 1, localPositionMs, false, isLive, entry.source, startsNewTimeline(entry));
   }).join('');
 
   // Full rerender is fine here because visible rows are small. This keeps the code reliable on iOS Safari.
   els.waterfall.innerHTML = html || '<div class="timeline-row"><div class="row-index">—</div><div class="source-cell empty-source">NO</div><div class="count-cell">--</div><div class="track-area"><div class="playhead"></div><div class="row-description empty-description">Import a CSV from Admin</div></div></div>';
 }
 
-function rowHtml(entry, displayIndex, nowMs, pinned, isLive, sourceOverride) {
+function rowHtml(entry, displayIndex, nowMs, pinned, isLive, sourceOverride, timelineStart = false) {
   const color = entry.color || '#666';
   const desc = formatDescription(entry, pinned, isLive);
   const effectiveEndMs = entry.renderEndMs || entry.endMs;
@@ -378,7 +411,9 @@ function rowHtml(entry, displayIndex, nowMs, pinned, isLive, sourceOverride) {
 
   const countClass = isLive ? 'live' : 'duration';
 
-  const rowClass = pinned ? `timeline-row pinned ${isLive ? 'current' : 'future'}` : `timeline-row ${isLive ? 'current' : 'future'}`;
+  const rowClass = pinned
+    ? `timeline-row pinned ${isLive ? 'current' : 'future'}`
+    : `timeline-row ${timelineStart ? 'timeline-start ' : ''}${isLive ? 'current' : 'future'}`;
   const indexLabel = pinned ? 'PIN' : displayIndex;
   const source = sourceOverride || entry.source || '—';
   const displaySource = getDisplaySource(source);
@@ -454,6 +489,27 @@ function cueGeometryHtml(entry, nowMs, color, isLive) {
   }
 
   return parts.join('');
+}
+
+function generalCueGeometryHtml(entries, nowMs) {
+  return entries.map(entry => {
+    const color = entry.color || findColorForSource(entry.source) || '#666';
+    const isLive = isEntryOnAir(entry, nowMs);
+    const className = isLive ? 'shot-bar general-shot' : 'shot-bar ghost general-shot';
+    const left = barLeftPx(entry.startMs, nowMs);
+    const width = Math.max(18, (entry.endMs - entry.startMs) / 1000 * currentZoom().pxPerSecond);
+    return `
+      <div class="${className}" style="left:${left}px;width:${width}px;background:${escapeAttr(color)}" title="${escapeAttr(getDisplaySource(entry.source))}"></div>
+    `;
+  }).join('');
+}
+
+function startsNewTimeline(entry) {
+  if (!entry?.timelineId) return false;
+  const entries = showData.entries || [];
+  const index = entries.findIndex(candidate => candidate.id === entry.id);
+  if (index <= 0) return false;
+  return entries[index - 1]?.timelineId !== entry.timelineId;
 }
 
 function shotPartHtml(shapeClass, startMs, endMs, nowMs, color, partClass) {

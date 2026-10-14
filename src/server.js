@@ -8,6 +8,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import * as timecodeEngine from './timecode-engine.js';
+import { formatMidiEvent, loadMidiConfig, startMidiInputLogger } from './midi-input.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +18,7 @@ const DATA_DIR = path.join(ROOT, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const ABBREVIATIONS_FILE = path.join(DATA_DIR, 'abbreviations.json');
 const COMPANION_FILE = path.join(DATA_DIR, 'companion.json');
+const MIDI_FILE = path.join(DATA_DIR, 'midi.json');
 
 const FPS = 25;
 const BASE_TIMECODE = '01:00:00:00';
@@ -40,6 +42,7 @@ app.use(express.static(PUBLIC_DIR));
 let store = loadStore();
 let abbreviations = loadAbbreviations();
 let companion = loadCompanion();
+let midiConfig = loadMidiConfig(MIDI_FILE);
 let companionRuntime = {
   lastPositionMs: null,
   pendingEvents: [],
@@ -47,7 +50,18 @@ let companionRuntime = {
   mixBlockUntilMs: 0,
   processing: false
 };
+let timelinePauseRuntime = {
+  lastFrame: 0,
+  lastShowId: null
+};
 syncTimecodeContext();
+const midiRuntime = startMidiInputLogger({
+  config: midiConfig,
+  logger: console,
+  onEvent(event) {
+    console.log(`[MIDI] ${formatMidiEvent(event)}`);
+  }
+});
 
 function newId(prefix = 'id') {
   return `${prefix}_${crypto.randomBytes(5).toString('hex')}`;
@@ -90,6 +104,7 @@ function ensureStoreShape(input) {
     show.createdAt ||= new Date().toISOString();
     show.updatedAt ||= new Date().toISOString();
     for (const timeline of show.timelines) {
+      timeline.pauseOnEnd = Boolean(timeline.pauseOnEnd);
       normalizeTimelineCameraSources(timeline);
       timeline.transitions = normalizeTransitions(timeline.transitions || []);
     }
@@ -226,6 +241,7 @@ function timelinePayload(timeline) {
   return {
     id: timeline.id,
     name: timeline.name,
+    pauseOnEnd: Boolean(timeline.pauseOnEnd),
     importedAt: timeline.importedAt,
     sourceFirstTimecode: timeline.sourceFirstTimecode,
     offsetFrames: timeline.offsetFrames || 0,
@@ -244,6 +260,7 @@ function afterShowTimelineChange(show) {
   syncTimecodeContext();
   setPlaybackPosition(positionMs);
   resetCompanionAutomation();
+  resetTimelinePauseRuntime();
   broadcastShow();
   broadcastState({ anchor: true });
 }
@@ -347,6 +364,7 @@ function showPayload(show = getActiveShow()) {
       timelines: show.timelines.map(t => ({
         id: t.id,
         name: t.name,
+        pauseOnEnd: Boolean(t.pauseOnEnd),
         offsetFrames: t.offsetFrames || 0,
         durationFrames: t.durationFrames || 0,
         startTimecode: framesToTimecode(BASE_FRAMES + (t.offsetFrames || 0), FPS),
@@ -441,6 +459,44 @@ function resetCompanionAutomation(positionMs = null) {
   companionRuntime.firedEventIds = new Set();
   companionRuntime.mixBlockUntilMs = 0;
   companionRuntime.processing = false;
+}
+
+function resetTimelinePauseRuntime(frame = timecodeEngine.getCurrentFrame()) {
+  timelinePauseRuntime.lastFrame = Math.max(0, Math.floor(Number(frame) || 0));
+  timelinePauseRuntime.lastShowId = getActiveShow()?.id || null;
+}
+
+function processTimelineEndPauses() {
+  const state = timecodeEngine.getState();
+  const activeShow = getActiveShow();
+  const currentFrame = timecodeEngine.getCurrentFrame();
+
+  if (timelinePauseRuntime.lastShowId !== (activeShow?.id || null)) {
+    resetTimelinePauseRuntime(currentFrame);
+  }
+
+  if (state.status !== 'playing') {
+    timelinePauseRuntime.lastFrame = currentFrame;
+    return;
+  }
+
+  const previousFrame = timelinePauseRuntime.lastFrame;
+  timelinePauseRuntime.lastFrame = currentFrame;
+
+  const timeline = (activeShow?.timelines || []).find(candidate => {
+    if (!candidate.pauseOnEnd || !(candidate.durationFrames > 0)) return false;
+    const endFrame = (candidate.offsetFrames || 0) + (candidate.durationFrames || 0);
+    return previousFrame < endFrame && currentFrame >= endFrame;
+  });
+
+  if (!timeline) return;
+
+  const endFrame = (timeline.offsetFrames || 0) + (timeline.durationFrames || 0);
+  timecodeEngine.seek(endFrame);
+  timecodeEngine.pause();
+  syncTimecodeContext();
+  resetCompanionAutomation(currentPositionMs());
+  timelinePauseRuntime.lastFrame = endFrame;
 }
 
 function processCompanionAutomation() {
@@ -584,6 +640,10 @@ app.get('/timecode', (_req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'timecode.html'));
 });
 
+app.get('/midi', (_req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, 'midi.html'));
+});
+
 app.get('/api/shows', (_req, res) => {
   res.json({
     fps: FPS,
@@ -617,6 +677,7 @@ app.post('/api/shows', (req, res) => {
   saveStore();
   syncTimecodeContext();
   timecodeEngine.stop();
+  resetTimelinePauseRuntime(0);
   resetCompanionAutomation(0);
   broadcastShow();
   broadcastState({ anchor: true });
@@ -632,6 +693,7 @@ app.post('/api/active-show', (req, res) => {
   saveStore();
   syncTimecodeContext();
   timecodeEngine.stop();
+  resetTimelinePauseRuntime(0);
   resetCompanionAutomation(0);
   broadcastShow();
   broadcastState({ anchor: true });
@@ -717,6 +779,7 @@ app.post('/api/import', upload.single('csv'), (req, res) => {
     store.activeShowId = show.id;
     syncTimecodeContext();
     timecodeEngine.stop();
+    resetTimelinePauseRuntime(0);
     resetCompanionAutomation(0);
     broadcastShow();
     broadcastState({ anchor: true });
@@ -766,6 +829,7 @@ app.post('/api/shows/:showId/timelines/:timelineId', upload.single('csv'), (req,
     if (req.file?.buffer) {
       const parsedTimeline = parseCsvTimeline(req.file.buffer.toString('utf8'), timelineName);
       parsedTimeline.id = timelineId;
+      parsedTimeline.pauseOnEnd = Boolean(show.timelines[idx].pauseOnEnd);
       show.timelines[idx] = parsedTimeline;
     } else {
       show.timelines[idx].name = timelineName;
@@ -781,6 +845,20 @@ app.post('/api/shows/:showId/timelines/:timelineId', upload.single('csv'), (req,
     console.error(err);
     res.status(400).json({ error: err.message || 'Timeline update failed.' });
   }
+});
+
+app.post('/api/shows/:showId/timelines/:timelineId/settings', (req, res) => {
+  const show = getShow(String(req.params.showId || ''));
+  if (!show) return res.status(404).json({ error: 'Show not found.' });
+
+  const timeline = getTimeline(show, String(req.params.timelineId || ''));
+  if (!timeline) return res.status(404).json({ error: 'Timeline not found.' });
+
+  timeline.pauseOnEnd = Boolean(req.body?.pauseOnEnd);
+  show.updatedAt = new Date().toISOString();
+  saveStore();
+  afterShowTimelineChange(show);
+  res.json({ ok: true, show: showPayload(show).show, timeline: timelinePayload(timeline) });
 });
 
 app.post('/api/shows/:showId/timelines/:timelineId/transitions', (req, res) => {
@@ -822,7 +900,7 @@ function handleControlAction(action, body = {}) {
   const activeShow = getActiveShow();
   const durationFrames = getShowDurationFrames(activeShow);
 
-  if (action === 'start') {
+  if (action === 'start' || action === 'unpause') {
     const currentFrame = timecodeEngine.getCurrentFrame();
     if (durationFrames && currentFrame >= durationFrames) timecodeEngine.seek(0);
     timecodeEngine.play();
@@ -830,12 +908,15 @@ function handleControlAction(action, body = {}) {
   } else if (action === 'pause') {
     timecodeEngine.pause();
     resetCompanionAutomation(currentPositionMs());
+    resetTimelinePauseRuntime();
   } else if (action === 'stop') {
     timecodeEngine.stop();
     resetCompanionAutomation(0);
+    resetTimelinePauseRuntime(0);
   } else if (action === 'reset') {
     timecodeEngine.reset();
     resetCompanionAutomation(0);
+    resetTimelinePauseRuntime(0);
   } else if (action === 'seek') {
     const positionMs = Number(body?.positionMs);
     if (!Number.isFinite(positionMs)) {
@@ -845,6 +926,7 @@ function handleControlAction(action, body = {}) {
     }
     timecodeEngine.seek(msToFrames(positionMs, FPS));
     resetCompanionAutomation(currentPositionMs());
+    resetTimelinePauseRuntime();
   } else {
     const error = new Error('Unknown control action.');
     error.statusCode = 400;
@@ -871,6 +953,7 @@ app.post('/api/control', (req, res) => {
 });
 
 app.post('/api/play', (req, res) => controlResponse('start', req, res));
+app.post('/api/unpause', (req, res) => controlResponse('unpause', req, res));
 app.post('/api/pause', (req, res) => controlResponse('pause', req, res));
 app.post('/api/stop', (req, res) => controlResponse('stop', req, res));
 app.post('/api/reset', (req, res) => controlResponse('reset', req, res));
@@ -910,6 +993,7 @@ wss.on('connection', (socket) => {
 });
 
 setInterval(() => {
+  processTimelineEndPauses();
   processCompanionAutomation();
   broadcastState();
 }, 100);
@@ -923,6 +1007,7 @@ const PORT = Number(process.env.PORT || 3000);
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Live waterfall server running on http://localhost:${PORT}`);
   console.log(`Admin: http://localhost:${PORT}/admin`);
+  console.log(`MIDI Control: http://localhost:${PORT}/midi`);
 });
 
 function parseCsvTimeline(csvText, timelineName) {
@@ -983,6 +1068,7 @@ function parseCsvTimeline(csvText, timelineName) {
     name: timelineName,
     importedAt: new Date().toISOString(),
     sourceFirstTimecode: records[0].Start,
+    pauseOnEnd: false,
     durationFrames: lastEnd,
     offsetFrames: 0,
     transitions: [],
@@ -1089,6 +1175,7 @@ function recomputeAllTimelineOffsets(nextStore) {
 function recomputeTimelineOffsets(show) {
   let offset = 0;
   for (const timeline of show.timelines || []) {
+    timeline.pauseOnEnd = Boolean(timeline.pauseOnEnd);
     timeline.offsetFrames = offset;
     timeline.durationFrames = Math.max(0, ...(timeline.entries || []).map(e => e.relativeEndFrames || 0));
     offset += timeline.durationFrames;

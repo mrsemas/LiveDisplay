@@ -325,12 +325,19 @@ function renderTimelineList(timelines) {
       </div>
       <div class="timeline-meta">${escapeHtml(t.id)}</div>
       <div class="timeline-actions">
+        <label class="timeline-toggle">
+          <input type="checkbox" data-pause-on-end="${escapeAttr(t.id)}" ${t.pauseOnEnd ? 'checked' : ''} />
+          <span>Pause at end</span>
+        </label>
         <a class="timeline-action" href="/admin/timeline?showId=${encodeURIComponent(showId)}&timelineId=${encodeURIComponent(t.id)}">Edit</a>
         <button class="timeline-action danger" type="button" data-remove-timeline="${escapeAttr(t.id)}" data-timeline-name="${escapeAttr(t.name)}">Remove</button>
       </div>
     </div>
   `).join('');
 
+  for (const input of els.timelineList.querySelectorAll('[data-pause-on-end]')) {
+    input.addEventListener('change', () => updateTimelinePauseOnEnd(input.dataset.pauseOnEnd, input.checked));
+  }
   for (const button of els.timelineList.querySelectorAll('[data-remove-timeline]')) {
     button.addEventListener('click', () => removeTimeline(button.dataset.removeTimeline, button.dataset.timelineName));
   }
@@ -451,6 +458,20 @@ async function saveTimelineOrder() {
   try {
     await postJson(`/api/shows/${encodeURIComponent(showId)}/timelines/reorder`, { timelineIds });
     setStatus('Timeline order saved.');
+    await refreshAll();
+  } catch (err) {
+    setStatus(err.message, true);
+    await refreshActiveShowDetails();
+  }
+}
+
+async function updateTimelinePauseOnEnd(timelineId, pauseOnEnd) {
+  const showId = showsPayload?.activeShowId || els.showSelect.value;
+  if (!showId || !timelineId) return;
+
+  try {
+    await postJson(`/api/shows/${encodeURIComponent(showId)}/timelines/${encodeURIComponent(timelineId)}/settings`, { pauseOnEnd });
+    setStatus(pauseOnEnd ? 'Timeline will pause at its end.' : 'Timeline will continue into the next timeline.');
     await refreshAll();
   } catch (err) {
     setStatus(err.message, true);
