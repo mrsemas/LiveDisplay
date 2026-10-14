@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>MIDI Show Control</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="admin-body midi-body">
+  <div class="admin-shell midi-shell">
+    <header class="admin-header">
+      <div>
+        <div class="eyebrow">MIDI</div>
+        <h1>Show Control</h1>
+      </div>
+      <div class="header-actions">
+        <a class="open-live" href="/admin">Admin</a>
+        <a class="open-live" href="/" target="_blank">Open Live View</a>
+      </div>
+    </header>
+
+    <section class="admin-card">
+      <h2>Input</h2>
+      <div class="midi-device-grid">
+        <button id="enableMidi" type="button" class="primary">Enable MIDI</button>
+        <button id="refreshMidi" type="button">Refresh Devices</button>
+        <label>
+          MIDI input device
+          <select id="inputSelect" disabled>
+            <option value="">MIDI Input Device: None</option>
+          </select>
+        </label>
+      </div>
+      <div class="midi-status-grid">
+        <div>
+          <div class="eyebrow">MIDI STATUS</div>
+          <div id="midiStatus" class="admin-big">OFF</div>
+        </div>
+        <div>
+          <div class="eyebrow">ACTIVE SHOW</div>
+          <div id="activeShow" class="admin-big">--</div>
+        </div>
+        <div>
+          <div class="eyebrow">PLAYBACK</div>
+          <div id="playbackState" class="admin-big">--</div>
+        </div>
+      </div>
+      <div id="midiMessage" class="muted small-text">Enable MIDI, select an input, then map note-on events to show controls.</div>
+    </section>
+
+    <section class="admin-card">
+      <div class="midi-section-head">
+        <h2>Note Mapping</h2>
+        <div class="abbr-actions">
+          <button id="addMapping" type="button">Add Mapping</button>
+          <button id="resetMappings" type="button">Reset Defaults</button>
+        </div>
+      </div>
+
+      <div class="midi-map-table" role="table" aria-label="MIDI note mappings">
+        <div class="midi-map-head" role="row">
+          <span>Note</span>
+          <span>Channel</span>
+          <span>Action</span>
+          <span>Show</span>
+          <span></span>
+        </div>
+        <div id="mappingRows" class="midi-map-rows"></div>
+      </div>
+      <div class="muted small-text midi-help">Use Learn to capture the next note-on from the selected input. Channel can stay on Any unless the controller sends duplicate notes on multiple channels.</div>
+    </section>
+
+    <section class="admin-card">
+      <h2>Detected MIDI Ports</h2>
+      <div id="portDiagnostics" class="midi-port-diagnostics">
+        <div class="muted small-text">Enable MIDI to inspect browser-visible input and output ports.</div>
+      </div>
+    </section>
+
+    <section class="admin-card">
+      <h2>Activity</h2>
+      <div class="midi-activity-head">
+        <div>Last input: <span id="lastInput">--</span></div>
+        <div>Last action: <span id="lastAction">--</span></div>
+      </div>
+      <div id="eventLog" class="midi-event-log" aria-live="polite"></div>
+    </section>
+  </div>
+
+  <script src="/midi.js" type="module"></script>
+</body>
+</html>
